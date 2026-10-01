@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YouTube AI Agent settings</title>
+<style>
+  :root { color-scheme: light dark; --bg:#fff; --fg:#0f0f0f; --muted:#606060; --line:#e5e5e5; --card:#f9f9f9; --accent:#e62117; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0f0f0f; --fg:#f1f1f1; --muted:#aaa; --line:#303030; --card:#181818; } }
+  body { margin:0; font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width:640px; margin:0 auto; padding:32px 20px 60px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 24px; }
+  fieldset { border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin:0 0 18px; background:var(--card); }
+  legend { font-weight:600; padding:0 6px; }
+  label { display:block; font-weight:500; margin:12px 0 4px; }
+  label:first-of-type { margin-top:0; }
+  input, select, textarea { width:100%; box-sizing:border-box; padding:9px 11px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--fg); font:inherit; }
+  textarea { min-height:70px; resize:vertical; }
+  .hint { color:var(--muted); font-size:12.5px; margin-top:4px; }
+  .row { display:flex; gap:10px; align-items:center; }
+  .row > * { flex:1; }
+  button { padding:10px 18px; border:0; border-radius:8px; background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
+  button.secondary { background:transparent; color:var(--fg); border:1px solid var(--line); }
+  #status { margin-left:12px; color:var(--muted); }
+  .hidden { display:none; }
+  a { color:inherit; }
+</style>
+</head>
+<body>
+<main>
+  <h1>YouTube AI Agent</h1>
+  <p class="sub">Your key is stored locally in Chrome and only sent to the provider you choose.</p>
+
+  <fieldset>
+    <legend>Model provider</legend>
+    <label for="provider">Provider</label>
+    <select id="provider">
+      <option value="anthropic">Anthropic (Claude)</option>
+      <option value="openai">OpenAI (GPT)</option>
+      <option value="gemini">Google Gemini</option>
+      <option value="custom">Custom OpenAI-compatible endpoint (Ollama, OpenRouter, Groq, LM Studio...)</option>
+    </select>
+
+    <div id="customUrlWrap" class="hidden">
+      <label for="baseUrl">Base URL</label>
+      <input id="baseUrl" placeholder="http://localhost:11434/v1">
+      <div class="hint">Must expose <code>/chat/completions</code>. Saving will ask Chrome for permission to reach this host.</div>
+    </div>
+
+    <label for="apiKey">API key</label>
+    <input id="apiKey" type="password" autocomplete="off" placeholder="sk-...">
+    <div class="hint" id="keyHint"></div>
+
+    <label for="model">Model</label>
+    <div class="row">
+      <input id="model" list="modelList" placeholder="model id">
+      <datalist id="modelList"></datalist>
+    </div>
+    <div class="hint">Type any model id your provider supports. Suggestions update when you change provider.</div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Defaults</legend>
+    <label for="analogyDomain">Default "explain it like..." framing</label>
+    <input id="analogyDomain" placeholder="e.g. I'm a rock climber, use climbing analogies">
+    <div class="hint">Used by the Explain mode when you leave the field blank on a video.</div>
+
+    <label for="persona">Default expert lens</label>
+    <input id="persona" placeholder="e.g. a vocal coach analyzing live performances">
+    <div class="hint">Used by the Ask mode. You can override it per video.</div>
+
+    <label for="language">Answer language</label>
+    <input id="language" placeholder="English">
+
+    <label for="maxTokens">Max response length (tokens)</label>
+    <input id="maxTokens" type="number" min="200" max="8000" step="100" value="1500">
+  </fieldset>
+
+  <div class="row" style="justify-content:flex-start">
+    <button id="save" style="flex:0 0 auto">Save</button>
+    <button id="test" class="secondary" style="flex:0 0 auto">Test connection</button>
+    <span id="status"></span>
+  </div>
+</main>
+<script src="options.js"></script>
+</body>
+</html>
