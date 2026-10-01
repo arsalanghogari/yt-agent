@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "YouTube AI Agent",
   "version": "1.1.0",
-  "description": "Summarize, explain with analogies you pick, or get expert commentary (e.g. a vocal coach) on any YouTube video. Bring your own API key for Anthropic, OpenAI, Gemini, or any OpenAI-compatible endpoint.",
+  "description": "Summarize any YouTube video, explain it with analogies you pick, or get expert commentary. Uses your own AI API key.",
   "permissions": ["storage"],
   "host_permissions": [
     "https://www.youtube.com/*",
