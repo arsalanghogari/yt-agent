@@ -31,11 +31,19 @@ For Ollama or another local server, pick "Custom OpenAI-compatible endpoint", en
 
 ## How it works
 
-- `content.js` runs on youtube.com. It fetches the watch page, reads the caption track list, downloads the transcript (manual captions preferred, auto-generated as fallback), merges it into 20-second blocks with timestamps, and injects the panel at the top of the right-hand column (`#secondary`, above related videos), falling back to under the player when the layout has no sidebar. It listens for YouTube's `yt-navigate-finish` event so the panel resets when you click into another video without a reload.
+- `content.js` runs on youtube.com. It fetches the watch page and reads the caption track list. YouTube now only serves captions to requests signed by its own player, so if a direct download comes back empty, the extension briefly toggles CC and picks up the player's signed caption request instead (restoring your CC setting afterwards). The transcript is merged into 20-second blocks with timestamps and sent along with the title, tags, and description, which help the model correct names that auto-captions mishear. It injects the panel at the top of the right-hand column (`#secondary`, above related videos), falling back to under the player when the layout has no sidebar, and listens for YouTube's `yt-navigate-finish` event so the panel switches to the right chat when you click into another video without a reload.
 - `background.js` is the service worker. It holds the provider adapters and makes the API calls, because content scripts cannot call third-party hosts directly.
 - `options.html/js` is the settings page.
 
-If a video has captions disabled, the agent falls back to the title and description and says so.
+If a video has no captions, the agent falls back to the title and description and says why.
+
+## Privacy
+
+No server, no analytics. Your key, settings, and chat history stay in Chrome's local storage; video content and prompts go only to the AI provider you pick. See [PRIVACY.md](PRIVACY.md).
+
+## License
+
+Copyright 2026 Arsalan Ghogari. Source available under the [PolyForm Strict License 1.0.0](LICENSE): you may install and use this extension for noncommercial purposes. You may not modify it, redistribute it, or build new works from it. For any other use, contact the author.
 
 ## Files
 
