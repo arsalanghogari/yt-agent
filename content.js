@@ -88,10 +88,14 @@
 
   function pickTrack(tracks) {
     if (!tracks.length) return null;
-    const manualEn = tracks.find((t) => t.languageCode?.startsWith("en") && t.kind !== "asr");
-    const anyManual = tracks.find((t) => t.kind !== "asr");
-    const asrEn = tracks.find((t) => t.languageCode?.startsWith("en"));
-    return manualEn || anyManual || asrEn || tracks[0];
+    // English first; otherwise the language actually spoken (the auto-caption track's language)
+    // beats an uploaded translation into some other language.
+    const manual = (t) => t.kind !== "asr";
+    const asr = tracks.find((t) => t.kind === "asr");
+    return tracks.find((t) => t.languageCode?.startsWith("en") && manual(t))
+      || tracks.find((t) => t.languageCode?.startsWith("en"))
+      || (asr && tracks.find((t) => manual(t) && t.languageCode === asr.languageCode))
+      || asr || tracks.find(manual) || tracks[0];
   }
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -193,22 +197,30 @@
     const track = pickTrack(data.tracks);
     let transcript = null, transcriptLang = null, transcriptError = null, autoCaptions = false;
     let segs = track ? await fetchTrack(track.baseUrl) : null;
-    if (segs) {
-      transcriptLang = track.name?.simpleText || track.languageCode;
-      autoCaptions = track.kind === "asr";
-    }
-    else {
+    if (!segs) {
       try {
-        const url = await captureCaptionUrl(videoId);
-        segs = await fetchTrack(url);
-        if (segs) {
-          transcriptLang = new URL(url).searchParams.get("lang");
-          autoCaptions = new URL(url).searchParams.get("kind") === "asr";
+        const url = new URL(await captureCaptionUrl(videoId));
+        // The signed URL is for whatever track the viewer's player has selected (possibly an
+        // auto-translation). The signature still works with another track, so ask for ours.
+        url.searchParams.delete("tlang");
+        if (track) {
+          url.searchParams.set("lang", track.languageCode);
+          if (track.kind) url.searchParams.set("kind", track.kind);
+          else url.searchParams.delete("kind");
         }
-        else transcriptError = "the closed captions came back empty";
+        segs = await fetchTrack(url.href);
+        if (!segs) transcriptError = "the closed captions came back empty";
+        else if (!track) {
+          transcriptLang = url.searchParams.get("lang");
+          autoCaptions = url.searchParams.get("kind") === "asr";
+        }
       } catch (e) {
         transcriptError = e.message;
       }
+    }
+    if (segs && track) {
+      transcriptLang = track.name?.simpleText || track.name?.runs?.[0]?.text || track.languageCode;
+      autoCaptions = track.kind === "asr";
     }
     if (segs) transcript = segmentsToText(segs);
     return { ...data, transcript, transcriptLang, transcriptError, autoCaptions };
@@ -581,6 +593,11 @@ RULES
     return $("#below") || $("ytd-watch-metadata")?.parentElement || null;
   }
 
+  // Track the player's height so the panel (in the sidebar) ends exactly where the video does.
+  const playerSize = new ResizeObserver(([entry]) => {
+    document.getElementById(PANEL_ID)?.style.setProperty("--yta-player-h", `${entry.target.offsetHeight}px`);
+  });
+
   let mountTimer = null;
   function mount() {
     const videoId = getVideoId();
@@ -596,6 +613,11 @@ RULES
       if (!mp) { mountTimer = setTimeout(tryMount, 500); return; }
       const panel = buildPanel();
       mp.prepend(panel);
+      const player = $("#movie_player");
+      if (player) {
+        panel.style.setProperty("--yta-player-h", `${player.offsetHeight}px`);
+        playerSize.observe(player);
+      }
       setMode("summarize");
       setStatus("Ready");
       restoreHistory(videoId);
