@@ -81,6 +81,8 @@ html[dark] #yta-panel {
 #yta-panel input:focus { border-color: var(--yta-accent); }
 #yta-panel .yta-actions { display: flex; align-items: center; gap: 12px; }
 #yta-panel .yta-hint { font-size: 12px; color: var(--yta-muted); }
+#yta-panel .yta-notice { margin: 2px 0 0; font-size: 12.5px; color: #d99a00; }
+#yta-panel .yta-notice:empty { display: none; }
 #yta-panel .yta-primary {
   padding: 8px 18px; border: 0; border-radius: 18px; background: var(--yta-accent); color: var(--yta-accent-fg);
   font: inherit; font-weight: 600; cursor: pointer;
@@ -128,8 +130,9 @@ html[dark] #yta-panel a.yta-ts { color: #3ea6ff; background: rgba(62,166,255,.14
 /* When the panel lands under the player (no sidebar), give it a little breathing room. */
 #below > #yta-panel { margin: 12px 0 16px; }
 
-/* Beside the video (default layout): exactly as tall as the player; the conversation scrolls inside. */
-ytd-watch-flexy:not([theater]):not([fullscreen]) #secondary #yta-panel:not(.yta-collapsed) {
+/* Beside the video (default layout), once there is a conversation: exactly as tall as the player,
+   with the conversation scrolling inside. Before that the panel stays compact. */
+ytd-watch-flexy:not([theater]):not([fullscreen]) #secondary #yta-panel:not(.yta-collapsed):has(.yta-thread:not(:empty)) {
   height: var(--yta-player-h, auto);
   display: flex; flex-direction: column;
 }

@@ -67,7 +67,10 @@
     if (m) { try { player = JSON.parse(m[1]); } catch {} }
 
     const details = player?.videoDetails || {};
-    const tracks = player?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+    const captions = player?.captions?.playerCaptionsTracklistRenderer;
+    const tracks = captions?.captionTracks || [];
+    // Videos with AI dubs list several audio tracks; the default one is the original ("en-US.4" -> "en").
+    const audioId = captions?.audioTracks?.[captions.defaultAudioTrackIndex]?.audioTrackId;
 
     // Fallback regex if JSON parsing of the whole blob failed
     let tracksFallback = [];
@@ -81,21 +84,28 @@
       author: details.author || "",
       description: details.shortDescription || "",
       keywords: details.keywords || [],
+      originalLang: audioId ? audioId.split(/[-.]/)[0] : null,
       lengthSeconds: Number(details.lengthSeconds) || 0,
       tracks: tracks.length ? tracks : tracksFallback
     };
   }
 
-  function pickTrack(tracks) {
+  const baseLang = (code) => (code || "").split("-")[0];
+
+  function pickTrack(tracks, originalLang) {
     if (!tracks.length) return null;
-    // English first; otherwise the language actually spoken (the auto-caption track's language)
-    // beats an uploaded translation into some other language.
     const manual = (t) => t.kind !== "asr";
-    const asr = tracks.find((t) => t.kind === "asr");
-    return tracks.find((t) => t.languageCode?.startsWith("en") && manual(t))
-      || tracks.find((t) => t.languageCode?.startsWith("en"))
-      || (asr && tracks.find((t) => manual(t) && t.languageCode === asr.languageCode))
-      || asr || tracks.find(manual) || tracks[0];
+    // Uploaded captions in that language, else auto-captions in it.
+    const inLang = (l) => tracks.find((t) => baseLang(t.languageCode) === l && manual(t))
+      || tracks.find((t) => baseLang(t.languageCode) === l);
+    const asr = tracks.find((t) => !manual(t));
+    // English, then the video's original language. AI-dubbed videos sometimes list only captions of
+    // their dubs, so next take a Latin-script dub (names like "OpenAI" survive, unlike in e.g. Bangla).
+    // Otherwise the spoken language (the auto-caption track's) beats an uploaded translation.
+    return inLang("en")
+      || (originalLang && (inLang(originalLang) || ["es", "fr", "de", "pt", "it", "nl"].map(inLang).find(Boolean)))
+      || (asr && inLang(baseLang(asr.languageCode)))
+      || tracks[0];
   }
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -121,9 +131,10 @@
     const ccOn = () => btn.getAttribute("aria-pressed") === "true";
     const wasOn = ccOn();
     let hit = null;
-    // An observer, not getEntries(): YouTube clears the resource buffer regularly.
+    // An observer, not getEntries(): YouTube clears the resource buffer regularly. Not buffered either:
+    // the signed URL expires within a minute or two, so only take requests made after we ask.
     const obs = new PerformanceObserver((list) => { hit ||= list.getEntries().find((e) => isOurs(e.name))?.name; });
-    obs.observe({ type: "resource", buffered: true });
+    obs.observe({ type: "resource" });
     // Turning CC on (or off and on again) makes the player fetch. It sometimes ignores the
     // first toggle while still initialising, so retry a few times.
     for (let i = 0; i < 3 && !hit; i++) {
@@ -194,7 +205,7 @@
 
   async function loadVideoContext(videoId) {
     const data = await fetchVideoData(videoId);
-    const track = pickTrack(data.tracks);
+    const track = pickTrack(data.tracks, data.originalLang);
     let transcript = null, transcriptLang = null, transcriptError = null, autoCaptions = false;
     let segs = track ? await fetchTrack(track.baseUrl) : null;
     if (!segs) {
@@ -223,7 +234,9 @@
       autoCaptions = track.kind === "asr";
     }
     if (segs) transcript = segmentsToText(segs);
-    return { ...data, transcript, transcriptLang, transcriptError, autoCaptions };
+    const transcriptLangCode = baseLang(track?.languageCode) || null;
+    const fromDub = !!(segs && data.originalLang && transcriptLangCode && transcriptLangCode !== data.originalLang);
+    return { ...data, transcript, transcriptLang, transcriptLangCode, transcriptError, autoCaptions, fromDub };
   }
 
   // ---------- Prompting ----------
@@ -241,7 +254,7 @@
     const description = ctx.description ? `DESCRIPTION (written by the uploader):\n${ctx.description.slice(0, 6000)}` : "";
 
     const content = ctx.transcript
-      ? `TRANSCRIPT (${ctx.autoCaptions ? "auto-generated captions: expect misheard words, especially names, products and jargon" : "captions"}; each line starts with its timestamp):\n${ctx.transcript}`
+      ? `TRANSCRIPT (${ctx.autoCaptions ? "auto-generated captions: expect misheard words, especially names, products and jargon" : "captions"}; each line starts with its timestamp)${ctx.fromDub ? `\nNote: this video was made in "${ctx.originalLang}", but the only captions available are of a dubbed "${ctx.transcriptLangCode}" audio track. Treat it as a translation of what was said.` : ""}:\n${ctx.transcript}`
       : `No transcript could be read (${ctx.transcriptError || "unknown reason"}). Work only from the title and description, and say clearly that you could not access the spoken content.`;
 
     return `You are an AI agent embedded in a YouTube page, helping the viewer with the video that is currently open.
@@ -382,6 +395,7 @@ RULES
     const s = $("#yta-status");
     if (!s) return;
     s.textContent = text;
+    s.title = text; // the header truncates long messages
     s.className = "yta-status " + kind;
   }
 
@@ -430,7 +444,8 @@ RULES
         el("input", { id: "yta-question", placeholder: "Optional question (e.g. how is she handling the belt in the chorus?)" })),
       el("div", { class: "yta-actions" },
         el("button", { id: "yta-run", class: "yta-primary", text: "Go", onclick: runMode }),
-        el("span", { class: "yta-hint", id: "yta-hint" }))
+        el("span", { class: "yta-hint", id: "yta-hint" })),
+      el("p", { class: "yta-notice", id: "yta-notice" })
     );
 
     form.addEventListener("keydown", (e) => {
@@ -467,12 +482,17 @@ RULES
     if (state.ctxPromise) return state.ctxPromise;
     setStatus("Reading transcript...", "yta-busy");
     state.ctxPromise = loadVideoContext(state.videoId).then((ctx) => {
+      const notice = $("#yta-notice");
       if (ctx.transcript) {
         state.ctx = ctx;
         setStatus(`Transcript loaded${ctx.transcriptLang ? " (" + ctx.transcriptLang + ")" : ""}`, "yta-ok");
+        if (notice) notice.textContent = ctx.fromDub
+          ? `This video has no captions in its original language, so the agent is reading the ${ctx.transcriptLang} captions of a dubbed version.`
+          : "";
       } else {
         state.ctxPromise = null; // retry on the next request (e.g. an ad was playing)
-        setStatus(`No transcript: ${ctx.transcriptError}. Using title and description only`, "yta-warn");
+        setStatus("No transcript", "yta-warn");
+        if (notice) notice.textContent = `Couldn't read the captions: ${ctx.transcriptError}. Answers will use only the title and description. Press Go to try again.`;
       }
       return ctx;
     }).catch((e) => {
