@@ -1,8 +1,8 @@
-# Privacy Policy: YouTube AI Agent
+# Privacy Policy: AI Agent for YouTube
 
 Last updated: 2026-09-30
 
-YouTube AI Agent is a browser extension that runs entirely in your browser. It has no server of its own, and the developer does not collect, receive, or store any of your data.
+AI Agent for YouTube is a browser extension that runs entirely in your browser. It has no server of its own, and the developer does not collect, receive, or store any of your data.
 
 ## What the extension handles
 

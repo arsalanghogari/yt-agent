@@ -1,4 +1,4 @@
-# YouTube AI Agent (Chrome extension)
+# AI Agent for YouTube (Chrome extension)
 
 An AI panel that sits right under the YouTube player and does three things with the video you have open:
 
