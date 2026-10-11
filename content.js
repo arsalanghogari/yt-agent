@@ -324,10 +324,19 @@ RULES
   // The default provider: free, no API key, and nothing leaves the device. Chrome only downloads the
   // model (several GB, once) right after a user click, so Go/Send call startBuiltin() before any await.
 
+  // A provider picked in settings but missing its key, model or URL can't work, so the built-in AI is
+  // used instead of asking the user to set something up. Same rule as effectiveProvider() in background.js.
+  const effectiveProvider = (c) =>
+    !c.provider || c.provider === "builtin" || !c.model || !(c.provider === "custom" ? c.baseUrl : c.apiKey)
+      ? "builtin" : c.provider;
+
+  // Read synchronously by the click handlers, so kept up to date here (the API key itself isn't kept).
   const prefs = { provider: "builtin", language: "English" };
-  chrome.storage.local.get(["provider", "language"]).then((c) => Object.assign(prefs, c));
+  const loadPrefs = () => chrome.storage.local.get(["provider", "apiKey", "baseUrl", "model", "language"])
+    .then((c) => Object.assign(prefs, { provider: effectiveProvider(c), language: c.language || "English" }));
+  loadPrefs();
   chrome.storage.onChanged.addListener((changes) => {
-    for (const k of ["provider", "language"]) if (changes[k]) prefs[k] = changes[k].newValue || prefs[k];
+    if (["provider", "apiKey", "baseUrl", "model", "language"].some((k) => k in changes)) loadPrefs();
   });
 
   // Languages the on-device model supports; anything else is answered in English.
@@ -657,7 +666,7 @@ RULES
   async function ask(userContent, displayLabel, language, builtinReady) {
     const configured = await chrome.runtime.sendMessage({ type: "isConfigured" });
     if (!configured?.ok) {
-      addMessage("assistant", "**Set up a model first.** Click the ⚙ icon and add an API key for Anthropic, OpenAI, Gemini, or a custom endpoint.");
+      addMessage("assistant", "**No AI is set up.** Click ⚙ and choose Chrome built-in AI (free, no key) or add an API key.");
       return;
     }
     state.busy = true;

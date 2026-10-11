@@ -207,9 +207,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === "isConfigured") {
     (async () => {
       const cfg = await getConfig();
-      if (cfg.provider === "builtin") return sendResponse({ ok: true, provider: "builtin", model: "Chrome built-in AI" });
-      const ok = !!cfg.model && (cfg.provider === "custom" ? !!cfg.baseUrl : !!cfg.apiKey);
-      sendResponse({ ok, provider: cfg.provider, model: cfg.model });
+      // A provider without its key, model or URL can't work: fall back to the free built-in AI.
+      // Same rule as effectiveProvider() in content.js.
+      const usable = cfg.provider !== "builtin" && !!cfg.model && (cfg.provider === "custom" ? !!cfg.baseUrl : !!cfg.apiKey);
+      if (!usable) return sendResponse({ ok: true, provider: "builtin", model: "Chrome built-in AI" });
+      sendResponse({ ok: true, provider: cfg.provider, model: cfg.model });
     })();
     return true;
   }
