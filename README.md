@@ -24,7 +24,7 @@ Your key is stored in Chrome's local extension storage and is only ever sent to 
 1. Unzip this folder somewhere permanent.
 2. Open `chrome://extensions`, turn on **Developer mode** (top right).
 3. Click **Load unpacked** and pick the folder.
-4. The settings page opens automatically. Choose a provider, paste your key, pick a model, click **Test connection**, then **Save**.
+4. The settings page opens automatically. Choose a provider, paste your key, pick a model, click **Test connection**, then **Save**. Chrome asks once for permission to reach that provider; choose **Allow**. (The install prompt only lists youtube.com, because access to an AI provider is requested only for the one you pick.)
 5. Open any YouTube video. The panel appears at the top of the right column, above the related videos. Click the header to expand or collapse it.
 
 For Ollama or another local server, pick "Custom OpenAI-compatible endpoint", enter something like `http://localhost:11434/v1`, leave the key blank, and set the model to whatever you have pulled (e.g. `llama3.1`). Chrome will ask once for permission to reach that host. Ollama needs `OLLAMA_ORIGINS="chrome-extension://*"` set so it accepts requests from an extension.

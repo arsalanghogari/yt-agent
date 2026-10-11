@@ -134,8 +134,21 @@ async function callGemini({ system, messages }, cfg, onDelta) {
   return text;
 }
 
+const PROVIDER_URLS = {
+  anthropic: "https://api.anthropic.com",
+  openai: "https://api.openai.com",
+  gemini: "https://generativelanguage.googleapis.com"
+};
+
 async function chat(req, cfg, onDelta = () => {}) {
   if (!cfg.model) throw new Error("No model set. Open the extension settings.");
+  // Provider hosts are optional permissions granted from the settings page (see options.js).
+  const url = cfg.provider === "custom" ? cfg.baseUrl : PROVIDER_URLS[cfg.provider];
+  let origin = null;
+  try { origin = new URL(url).origin; } catch {}
+  if (origin && !(await chrome.permissions.contains({ origins: [origin + "/*"] }))) {
+    throw new Error(`The extension doesn't have access to ${origin} yet. Open ⚙ settings and click Save, then choose Allow.`);
+  }
   switch (cfg.provider) {
     case "anthropic":
       if (!cfg.apiKey) throw new Error("No Anthropic API key set.");

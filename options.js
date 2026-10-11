@@ -56,6 +56,14 @@ function setStatus(msg, ok = true) {
   s.style.color = ok ? "" : "#e62117";
 }
 
+// AI provider hosts are optional permissions, so the install prompt only lists youtube.com.
+// Access to the one provider the user picks is requested when they save or test.
+const PROVIDER_URLS = {
+  anthropic: "https://api.anthropic.com",
+  openai: "https://api.openai.com",
+  gemini: "https://generativelanguage.googleapis.com"
+};
+
 async function ensureHostPermission(baseUrl) {
   if (!baseUrl) return true;
   let origin;
@@ -88,19 +96,23 @@ $("save").addEventListener("click", async () => {
   const cfg = readForm();
   if (cfg.provider === "custom") {
     if (!cfg.baseUrl) return setStatus("Base URL is required for a custom endpoint.", false);
-    const granted = await ensureHostPermission(cfg.baseUrl);
-    if (!granted) return setStatus("Permission for that host was not granted.", false);
   } else if (!cfg.apiKey) {
     return setStatus("API key is required.", false);
   }
   if (!cfg.model) return setStatus("Model id is required.", false);
+  if (!(await ensureHostPermission(cfg.baseUrl || PROVIDER_URLS[cfg.provider]))) {
+    return setStatus("Chrome needs your permission to reach that provider. Click Save again and choose Allow.", false);
+  }
   await chrome.storage.local.set(cfg);
   setStatus("Saved.");
 });
 
 $("test").addEventListener("click", async () => {
-  setStatus("Testing...");
   const cfg = readForm();
+  if (!(await ensureHostPermission(cfg.provider === "custom" ? cfg.baseUrl : PROVIDER_URLS[cfg.provider]))) {
+    return setStatus("Chrome needs your permission to reach that provider. Click Test again and choose Allow.", false);
+  }
+  setStatus("Testing...");
   const res = await chrome.runtime.sendMessage({
     type: "chat",
     configOverride: cfg,
