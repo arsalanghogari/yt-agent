@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "AI Agent for YouTube",
-  "version": "1.1.6",
-  "description": "Summarize any YouTube video, explain it with analogies you pick, or get expert commentary. Uses your own AI API key.",
+  "version": "1.2.0",
+  "description": "Summarize any YouTube video, explain it with analogies you pick, or get expert commentary. Free on-device AI, no setup.",
   "permissions": ["storage"],
   "host_permissions": ["https://www.youtube.com/*"],
   "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],

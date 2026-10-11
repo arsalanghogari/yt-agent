@@ -13,7 +13,7 @@ const KEY_HINTS = {
 };
 
 const DEFAULTS = {
-  provider: "anthropic",
+  provider: "builtin",
   apiKey: "",
   model: "",
   baseUrl: "",
@@ -35,6 +35,8 @@ function fillModelList(provider) {
   }
   $("keyHint").textContent = KEY_HINTS[provider] || "";
   $("customUrlWrap").classList.toggle("hidden", provider !== "custom");
+  $("keyModelWrap").classList.toggle("hidden", provider === "builtin");
+  $("builtinHint").classList.toggle("hidden", provider !== "builtin");
 }
 
 function readForm() {
@@ -78,7 +80,7 @@ async function load() {
   $("provider").value = cfg.provider;
   fillModelList(cfg.provider);
   $("apiKey").value = cfg.apiKey;
-  $("model").value = cfg.model || MODEL_SUGGESTIONS[cfg.provider][0];
+  $("model").value = cfg.model || MODEL_SUGGESTIONS[cfg.provider]?.[0] || "";
   $("baseUrl").value = cfg.baseUrl;
   $("analogyDomain").value = cfg.analogyDomain;
   $("persona").value = cfg.persona;
@@ -89,11 +91,15 @@ async function load() {
 $("provider").addEventListener("change", () => {
   const p = $("provider").value;
   fillModelList(p);
-  $("model").value = MODEL_SUGGESTIONS[p][0];
+  $("model").value = MODEL_SUGGESTIONS[p]?.[0] || "";
 });
 
 $("save").addEventListener("click", async () => {
   const cfg = readForm();
+  if (cfg.provider === "builtin") {
+    await chrome.storage.local.set(cfg);
+    return setStatus("Saved. Open any YouTube video and press Go.");
+  }
   if (cfg.provider === "custom") {
     if (!cfg.baseUrl) return setStatus("Base URL is required for a custom endpoint.", false);
   } else if (!cfg.apiKey) {
@@ -107,7 +113,33 @@ $("save").addEventListener("click", async () => {
   setStatus("Saved.");
 });
 
+// Chrome's on-device model. create() is called straight from the click, because Chrome only starts the
+// one-time model download right after a user gesture.
+async function testBuiltin() {
+  if (typeof LanguageModel === "undefined") {
+    return setStatus("This version of Chrome doesn't include built-in AI. Update Chrome, or pick a provider with an API key.", false);
+  }
+  const opts = { expectedInputs: [{ type: "text", languages: ["en"] }], expectedOutputs: [{ type: "text", languages: ["en"] }] };
+  setStatus("Starting Chrome's AI model...");
+  try {
+    const session = await LanguageModel.create({
+      ...opts,
+      monitor: (m) => m.addEventListener("downloadprogress", (e) =>
+        setStatus(`Downloading Chrome's AI model (one time only)... ${Math.round(e.loaded * 100)}%`))
+    });
+    const reply = await session.prompt("Reply with exactly: OK");
+    session.destroy();
+    setStatus(`Works on this computer. Model replied: "${reply.trim().slice(0, 40)}"`);
+  } catch (e) {
+    const a = await LanguageModel.availability(opts).catch(() => "unavailable");
+    setStatus(a === "unavailable"
+      ? "This computer doesn't meet the requirements for Chrome's built-in AI. Pick a provider with an API key instead."
+      : "Failed: " + (e?.message || e), false);
+  }
+}
+
 $("test").addEventListener("click", async () => {
+  if ($("provider").value === "builtin") return testBuiltin();
   const cfg = readForm();
   if (!(await ensureHostPermission(cfg.provider === "custom" ? cfg.baseUrl : PROVIDER_URLS[cfg.provider]))) {
     return setStatus("Chrome needs your permission to reach that provider. Click Test again and choose Allow.", false);

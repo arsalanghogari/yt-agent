@@ -2,7 +2,7 @@
 // and routes them to whichever provider the user picked in settings.
 
 const DEFAULTS = {
-  provider: "anthropic",
+  provider: "builtin", // Chrome's on-device AI; runs in the page (content.js), not here
   apiKey: "",
   model: "",
   baseUrl: "",
@@ -207,6 +207,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === "isConfigured") {
     (async () => {
       const cfg = await getConfig();
+      if (cfg.provider === "builtin") return sendResponse({ ok: true, provider: "builtin", model: "Chrome built-in AI" });
       const ok = !!cfg.model && (cfg.provider === "custom" ? !!cfg.baseUrl : !!cfg.apiKey);
       sendResponse({ ok, provider: cfg.provider, model: cfg.model });
     })();
@@ -216,6 +217,3 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
 chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());
 
-chrome.runtime.onInstalled.addListener(({ reason }) => {
-  if (reason === "install") chrome.runtime.openOptionsPage();
-});

@@ -29,12 +29,13 @@
 <body>
 <main>
   <h1>AI Agent for YouTube</h1>
-  <p class="sub">Your key is stored locally in Chrome and only sent to the provider you choose.</p>
+  <p class="sub">Works out of the box with Chrome's built-in AI. Or use your own API key for stronger answers: it's stored locally in Chrome and only sent to the provider you choose.</p>
 
   <fieldset>
     <legend>Model provider</legend>
     <label for="provider">Provider</label>
     <select id="provider">
+      <option value="builtin">Chrome built-in AI (free, runs on your computer, no key needed)</option>
       <option value="anthropic">Anthropic (Claude)</option>
       <option value="openai">OpenAI (GPT)</option>
       <option value="gemini">Google Gemini</option>
@@ -47,6 +48,9 @@
       <div class="hint">Must expose <code>/chat/completions</code>. Saving will ask Chrome for permission to reach this host.</div>
     </div>
 
+    <div id="builtinHint" class="hint hidden">Uses Gemini Nano, which Chrome runs on your own computer, so nothing about the video leaves your device. The first time, Chrome downloads the model (a few GB). It needs 22 GB of free disk space plus a graphics card with more than 4 GB of memory or 16 GB of RAM. Answers are simpler than the cloud providers'.</div>
+
+    <div id="keyModelWrap">
     <label for="apiKey">API key</label>
     <input id="apiKey" type="password" autocomplete="off" placeholder="sk-...">
     <div class="hint" id="keyHint"></div>
@@ -57,6 +61,7 @@
       <datalist id="modelList"></datalist>
     </div>
     <div class="hint">Type any model id your provider supports. Suggestions update when you change provider.</div>
+    </div>
   </fieldset>
 
   <fieldset>

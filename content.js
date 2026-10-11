@@ -320,6 +320,125 @@ RULES
     });
   }
 
+  // ---------- Chrome built-in AI (Gemini Nano, runs on the user's computer) ----------
+  // The default provider: free, no API key, and nothing leaves the device. Chrome only downloads the
+  // model (several GB, once) right after a user click, so Go/Send call startBuiltin() before any await.
+
+  const prefs = { provider: "builtin", language: "English" };
+  chrome.storage.local.get(["provider", "language"]).then((c) => Object.assign(prefs, c));
+  chrome.storage.onChanged.addListener((changes) => {
+    for (const k of ["provider", "language"]) if (changes[k]) prefs[k] = changes[k].newValue || prefs[k];
+  });
+
+  // Languages the on-device model supports; anything else is answered in English.
+  const BUILTIN_LANGS = { english: "en", spanish: "es", japanese: "ja", german: "de", french: "fr" };
+  function builtinOptions(language) {
+    const out = BUILTIN_LANGS[(language || "").trim().toLowerCase()] || "en";
+    return {
+      expectedInputs: [{ type: "text", languages: [...new Set(["en", out])] }],
+      expectedOutputs: [{ type: "text", languages: [out] }]
+    };
+  }
+
+  class BuiltinUnavailable extends Error {}
+
+  // The user's answer language if this Chrome supports it on-device, otherwise English.
+  async function resolveBuiltinOptions(language) {
+    const opts = builtinOptions(language);
+    if (opts.expectedOutputs[0].languages[0] === "en") return opts;
+    return (await LanguageModel.availability(opts)) === "unavailable" ? builtinOptions("English") : opts;
+  }
+
+  // Must be called synchronously from a click handler. Resolves to the model options once it's ready.
+  function startBuiltin(language) {
+    if (typeof LanguageModel === "undefined") {
+      return Promise.reject(new BuiltinUnavailable("this version of Chrome doesn't include it. Updating Chrome may add it"));
+    }
+    let opts;
+    return resolveBuiltinOptions(language).then((o) => LanguageModel.create({
+      ...(opts = o),
+      monitor: (m) => m.addEventListener("downloadprogress", (e) =>
+        setStatus(`Downloading Chrome's AI model (one time only)... ${Math.round(e.loaded * 100)}%`, "yta-busy"))
+    })).then((s) => { s.destroy(); return opts; }, async (e) => {
+      opts ||= builtinOptions("English");
+      if ((await LanguageModel.availability(opts).catch(() => "unavailable")) === "unavailable") {
+        throw new BuiltinUnavailable("this computer doesn't meet its requirements (22 GB of free disk space, plus a graphics card with more than 4 GB of memory or 16 GB of RAM)");
+      }
+      throw e;
+    });
+  }
+
+  const CONDENSE_PROMPT = "You condense one part of a YouTube video transcript into dense notes. Each transcript line starts with a [m:ss] timestamp. Write one short line per distinct point, each starting with the timestamp where that point begins, in the same [m:ss] format. Keep names, numbers, claims, examples and recommendations. No introduction, headings or commentary.";
+
+  // The on-device model has a small context window. If the transcript doesn't fit, condense it part by
+  // part into timestamped notes first (cached on the video's context), then answer from the notes.
+  async function fitForBuiltin(ctx, opts) {
+    if (!ctx.transcript) return ctx;
+    if (ctx.builtinTranscript) return { ...ctx, transcript: ctx.builtinTranscript };
+    const probe = await LanguageModel.create(opts);
+    try {
+      const windowSize = probe.contextWindow ?? probe.inputQuota;
+      const measure = (t) => (probe.measureContextUsage ?? probe.measureInputUsage).call(probe, t);
+      const budget = windowSize * 0.5; // leave room for instructions, the conversation and the answer
+      let transcript = ctx.transcript;
+      for (let round = 0; round < 3; round++) {
+        const tokens = await measure(transcript);
+        if (tokens <= budget) break;
+        // Split on line boundaries into parts that each fit comfortably in their own session.
+        const maxChars = Math.floor(budget * 0.8 * (transcript.length / tokens));
+        const parts = [];
+        let cur = "";
+        for (const line of transcript.split("\n")) {
+          if (cur && cur.length + line.length > maxChars) { parts.push(cur); cur = ""; }
+          cur += (cur ? "\n" : "") + line.slice(0, maxChars);
+        }
+        if (cur) parts.push(cur);
+        const notes = [];
+        for (const [i, part] of parts.entries()) {
+          setStatus(`Reading the video with on-device AI... part ${i + 1} of ${parts.length}`, "yta-busy");
+          const s = await LanguageModel.create({ ...opts, initialPrompts: [{ role: "system", content: CONDENSE_PROMPT }] });
+          try { notes.push((await s.prompt(part)).trim()); } finally { s.destroy(); }
+        }
+        transcript = notes.join("\n");
+      }
+      if (transcript !== ctx.transcript) {
+        transcript = `(Condensed notes of the transcript, made so it fits the on-device AI.)\n${transcript}`;
+      }
+      ctx.builtinTranscript = transcript;
+      return { ...ctx, transcript };
+    } finally {
+      probe.destroy();
+    }
+  }
+
+  async function builtinChat(ctx, language, messages, onDelta, opts) {
+    opts ||= await resolveBuiltinOptions(language);
+    if (opts.expectedOutputs[0].languages[0] === "en") language = "English"; // language not available on-device
+    const system = buildSystem(await fitForBuiltin(ctx, opts), language);
+    const history = messages.slice(0, -1).map(({ role, content }) => ({ role, content }));
+    const session = await LanguageModel.create({ ...opts, initialPrompts: [{ role: "system", content: system }, ...history] });
+    try {
+      let text = "";
+      for await (const chunk of session.promptStreaming(messages.at(-1).content)) {
+        // Older Chrome versions streamed the whole answer so far; newer ones stream only the new part.
+        text = text && chunk.startsWith(text) ? chunk : text + chunk;
+        onDelta(text);
+      }
+      return text;
+    } finally {
+      session.destroy();
+    }
+  }
+
+  function builtinError(e) {
+    if (e instanceof BuiltinUnavailable) {
+      return `**Chrome's built-in AI isn't available:** ${e.message}.\n\nClick ⚙ and pick an AI provider with your own API key instead. It takes about a minute.`;
+    }
+    if (e?.name === "QuotaExceededError") return "This conversation is too long for the on-device AI. Click 🗑 to start a fresh one.";
+    if (e?.name === "NotAllowedError") return "Chrome needs a fresh click to start its AI model. Press Go again.";
+    return `**Error:** ${e?.message || e}`;
+  }
+
   // ---------- Rendering ----------
 
   function renderMarkdown(md) {
@@ -506,6 +625,8 @@ RULES
   async function runMode() {
     if (!alive()) return;
     if (state.busy) return;
+    const builtinReady = prefs.provider === "builtin" ? startBuiltin(prefs.language) : null;
+    builtinReady?.catch(() => {}); // awaited (and reported) in ask()
     const mode = state.mode;
     const cfg = await chrome.storage.local.get(["analogyDomain", "persona", "language"]);
     const fields = {
@@ -518,7 +639,7 @@ RULES
     const label = mode === "summarize" ? "Summarize" + (fields.focus ? `: ${fields.focus}` : "")
       : mode === "explain" ? fields.framing ? `Explain: ${fields.framing}` : "Explain simply"
       : `Ask an expert: ${[fields.persona && `As ${fields.persona.replace(/^as\s+/i, "")}`, fields.question].filter(Boolean).join(", ") || "general commentary"}`;
-    await ask(task, label, cfg.language);
+    await ask(task, label, cfg.language, builtinReady);
   }
 
   async function sendFollowup() {
@@ -526,12 +647,14 @@ RULES
     const input = $("#yta-followup-input");
     const q = input.value.trim();
     if (!q || state.busy) return;
+    const builtinReady = prefs.provider === "builtin" ? startBuiltin(prefs.language) : null;
+    builtinReady?.catch(() => {}); // awaited (and reported) in ask()
     input.value = "";
     const cfg = await chrome.storage.local.get(["language"]);
-    await ask(q, q, cfg.language);
+    await ask(q, q, cfg.language, builtinReady);
   }
 
-  async function ask(userContent, displayLabel, language) {
+  async function ask(userContent, displayLabel, language, builtinReady) {
     const configured = await chrome.runtime.sendMessage({ type: "isConfigured" });
     if (!configured?.ok) {
       addMessage("assistant", "**Set up a model first.** Click the ⚙ icon and add an API key for Anthropic, OpenAI, Gemini, or a custom endpoint.");
@@ -542,12 +665,13 @@ RULES
     addMessage("user", displayLabel);
     const pending = addMessage("assistant", "", { pending: true });
     try {
+      const builtin = configured.provider === "builtin";
+      const builtinOpts = builtin ? await builtinReady : null; // model ready before the slower caption fetch
       const ctx = await ensureContext();
-      const system = buildSystem(ctx, language);
       state.messages.push({ role: "user", content: userContent, label: displayLabel });
       const thread = $("#yta-thread");
       let frame = 0, latest = "";
-      const res = await sendChat(system, state.messages, (text) => {
+      const onDelta = (text) => {
         latest = text;
         // Re-render at most once per frame; only follow the bottom if the reader is already there.
         frame ||= requestAnimationFrame(() => {
@@ -556,22 +680,27 @@ RULES
           fillAssistant(pending, latest, { streaming: true });
           if (atBottom) thread.scrollTop = thread.scrollHeight;
         });
-      });
+      };
+      const res = builtin
+        ? await builtinChat(ctx, language, state.messages, onDelta, builtinOpts).then(
+            (text) => ({ ok: true, text }),
+            (e) => ({ ok: false, error: builtinError(e), partial: latest }))
+        : await sendChat(buildSystem(ctx, language), state.messages, onDelta);
       cancelAnimationFrame(frame);
       if (!res?.ok) {
         state.messages.pop();
         if (res?.partial) fillAssistant(pending, res.partial);
         else pending.remove();
-        addMessage("assistant", `**Error:** ${res?.error || "unknown"}\n\nCheck your key and model in ⚙ settings.`);
+        addMessage("assistant", builtin ? res.error : `**Error:** ${res?.error || "unknown"}\n\nCheck your key and model in ⚙ settings.`);
       } else {
         state.messages.push({ role: "assistant", content: res.text });
         fillAssistant(pending, res.text);
         saveHistory();
-        setStatus(`${configured.provider} · ${configured.model}`, "yta-ok");
+        setStatus(builtin ? "Chrome built-in AI · on-device" : `${configured.provider} · ${configured.model}`, "yta-ok");
       }
     } catch (e) {
       pending.remove();
-      addMessage("assistant", `**Error:** ${e?.message || e}`);
+      addMessage("assistant", builtinError(e));
     } finally {
       state.busy = false;
       $("#yta-run").disabled = false;
