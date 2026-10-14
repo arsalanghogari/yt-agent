@@ -295,9 +295,9 @@ RULES
     }
     if (mode === "cut") {
       return [
-        `Make a short version of this video: pick the moments a viewer needs so that watching only them, back to back, gives them the key information. Aim for about ${fields.cutMinutes} minutes in total; less is fine if the video has less substance.`,
-        "Rules: chronological order, no overlaps, each moment at least 10 seconds long and starting and ending at natural sentence boundaries. Skip intros, sponsor segments, calls to subscribe, recaps and filler. Use only timestamps that appear in the transcript.",
-        'Reply with only a JSON array and no other text, like: [{"start":"1:05","end":"1:48","title":"3 to 6 word label"}]'
+        `Make a short version of this video, about ${fields.cutMinutes} minutes long: pick the moments a viewer needs so that watching only them, back to back, gives them the key information.`,
+        "Rules: chronological order, no overlaps, each moment 10 to 45 seconds long, starting and ending at natural sentence boundaries. Skip intros, sponsor segments, calls to subscribe, recaps and filler. Use only timestamps that appear in the transcript. Rate each moment's importance from 1 (nice to have) to 5 (essential). Offer a few more moments than fit; the least important are dropped to hit the length.",
+        'Reply with only a JSON array and no other text, like: [{"start":"1:05","end":"1:48","title":"3 to 6 word label","importance":4}]'
       ].join("\n");
     }
     // ask
@@ -672,7 +672,7 @@ RULES
       : mode === "explain" ? fields.framing ? `Explain: ${fields.framing}` : "Explain simply"
       : mode === "cut" ? `Watch short: about ${fields.cutMinutes} minutes`
       : `Ask an expert: ${[fields.persona && `As ${fields.persona.replace(/^as\s+/i, "")}`, fields.question].filter(Boolean).join(", ") || "general commentary"}`;
-    await ask(task, label, cfg.language, builtinReady, { cut: mode === "cut" });
+    await ask(task, label, cfg.language, builtinReady, { cut: mode === "cut" ? fields.cutMinutes : 0 });
   }
 
   async function sendFollowup() {
@@ -732,7 +732,7 @@ RULES
         else pending.remove();
         addMessage("assistant", builtin ? res.error : `**Error:** ${res?.error || "unknown"}\n\nCheck your key and model in ⚙ settings.`);
       } else if (cut) {
-        const segs = parseCut(res.text, ctx);
+        const segs = parseCut(res.text, ctx, cut * 60);
         if (!segs.length) {
           state.messages.pop();
           pending.remove();
@@ -770,8 +770,10 @@ RULES
   };
 
   // Turn the model's JSON into playable segments: snap to caption line starts (so cuts land on sentence
-  // edges), drop anything invalid or tiny, sort, and merge overlaps.
-  function parseCut(text, ctx) {
+  // edges), drop anything invalid or tiny, merge overlaps, then fit the requested length. Models are bad at
+  // adding up durations, so the length is enforced here: long moments are trimmed at a caption boundary,
+  // and the most important moments are kept until the budget is used, then played in order.
+  function parseCut(text, ctx, targetSeconds = Infinity) {
     let raw;
     try { raw = JSON.parse(text.match(/\[[\s\S]*\]/)?.[0]); } catch { return []; }
     if (!Array.isArray(raw)) return [];
@@ -780,7 +782,8 @@ RULES
     const snapStart = (t) => times.filter((x) => x <= t + 1).at(-1) ?? t;
     const snapEnd = (t) => Math.min(times.find((x) => x >= t) ?? t, dur);
     const segs = raw
-      .map((r) => ({ start: toSeconds(r?.start), end: toSeconds(r?.end), title: String(r?.title || "").trim().slice(0, 60) }))
+      .map((r) => ({ start: toSeconds(r?.start), end: toSeconds(r?.end), title: String(r?.title || "").trim().slice(0, 60),
+        importance: Math.min(5, Math.max(1, Number(r?.importance) || 3)) }))
       // judge length on the model's own times: snapping can stretch a 1-second blip to a whole caption line
       .filter((s) => Number.isFinite(s.start) && Number.isFinite(s.end) && s.start >= 0 && s.start < dur && s.end - s.start >= 3)
       .map((s) => ({ ...s, start: snapStart(s.start), end: snapEnd(s.end) }))
@@ -788,10 +791,26 @@ RULES
     const merged = [];
     for (const s of segs) {
       const last = merged.at(-1);
-      if (last && s.start <= last.end + 1) last.end = Math.max(last.end, s.end);
-      else merged.push(s);
+      if (last && s.start <= last.end + 1) {
+        last.end = Math.max(last.end, s.end);
+        last.importance = Math.max(last.importance, s.importance);
+      } else merged.push(s);
     }
-    return merged;
+    if (!Number.isFinite(targetSeconds)) return merged;
+
+    // Trim long moments to a caption boundary: a few short moments beat one long one.
+    const maxLen = Math.min(90, Math.max(20, targetSeconds * 0.4));
+    for (const s of merged) {
+      if (s.end - s.start <= maxLen) continue;
+      s.end = times.filter((x) => x > s.start + 10 && x <= s.start + maxLen).at(-1) ?? s.start + maxLen;
+    }
+    // Most important first (earlier wins ties); keep whatever fits in the budget.
+    const budget = targetSeconds * 1.1;
+    let used = 0;
+    const kept = [...merged].sort((a, b) => b.importance - a.importance || a.start - b.start)
+      .filter((s) => used + (s.end - s.start) <= budget && (used += s.end - s.start, true));
+    if (!kept.length && merged.length) kept.push({ ...merged[0], end: Math.min(merged[0].end, merged[0].start + budget) });
+    return kept.sort((a, b) => a.start - b.start);
   }
 
   function cutMarkdown(segs, total) {
