@@ -160,7 +160,11 @@
         for (const ev of j.events || []) {
           if (!ev.segs) continue;
           const text = ev.segs.map((s) => s.utf8).join("").replace(/\s+/g, " ").trim();
-          if (text) segs.push({ t: (ev.tStartMs || 0) / 1000, text });
+          if (!text) continue;
+          const t = (ev.tStartMs || 0) / 1000;
+          // Auto-captions carry a time per word; kept for cutting at exact words (buildTimeline).
+          const words = ev.segs.filter((s) => s.utf8.trim()).map((s) => ({ t: t + (s.tOffsetMs || 0) / 1000, text: s.utf8 }));
+          segs.push({ t, end: t + (ev.dDurationMs || 0) / 1000, text, words });
         }
         if (segs.length) return segs;
       }
@@ -169,15 +173,54 @@
       const r = await fetch(base, { credentials: "include" });
       const xml = await r.text();
       const segs = [];
-      const re = /<text start="([\d.]+)"[^>]*>([\s\S]*?)<\/text>/g;
+      const re = /<text start="([\d.]+)"(?:[^>]*?dur="([\d.]+)")?[^>]*>([\s\S]*?)<\/text>/g;
       let mm;
       while ((mm = re.exec(xml))) {
-        const text = decodeEntities(mm[2].replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim();
-        if (text) segs.push({ t: parseFloat(mm[1]), text });
+        const text = decodeEntities(mm[3].replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim();
+        const t = parseFloat(mm[1]);
+        if (text) segs.push({ t, end: t + (parseFloat(mm[2]) || 3), text });
       }
       if (segs.length) return segs;
     } catch {}
     return null;
+  }
+
+  // Word and sentence timings, for cutting the short version at full sentences. Auto-captions carry a time
+  // per word; uploaded captions only per line, so word times inside a line are interpolated by character
+  // position. Uploaded captions are punctuated, so sentences end at . ? ! — auto-captions usually aren't,
+  // so there pauses split the text into chunks (and the model's quoted first/last words do the real work,
+  // see findPhrase).
+  function buildTimeline(segs) {
+    const words = [];
+    for (const s of segs) {
+      const end = Math.max(s.end ?? s.t + 3, s.t + 0.1);
+      if (s.words?.length > 1) {
+        s.words.forEach((w, i) => words.push({ t: w.t, end: Math.min(s.words[i + 1]?.t ?? end, w.t + 0.8), text: w.text.trim() }));
+        continue;
+      }
+      for (const m of s.text.matchAll(/\S+/g)) {
+        words.push({ t: s.t + (end - s.t) * m.index / s.text.length, end: s.t + (end - s.t) * (m.index + m[0].length) / s.text.length, text: m[0] });
+      }
+    }
+    words.sort((a, b) => a.t - b.t);
+    const endsSentence = (w) => /[.?!…]["'”’)\]]*$/.test(w.text);
+    const punctuated = words.filter(endsSentence).length >= words.length / 40;
+    const sentences = [];
+    let cur = null;
+    words.forEach((w, i) => {
+      cur ||= { start: w.t, end: w.end, text: [] };
+      cur.text.push(w.text);
+      cur.end = Math.max(cur.end, w.end);
+      const next = words[i + 1];
+      const gap = next ? next.t - w.t : Infinity;
+      const len = cur.end - cur.start;
+      const ends = !next || (punctuated ? endsSentence(w) || len > 60 : gap > 1 || (len > 20 && gap > 0.5) || len > 40);
+      if (!ends) return;
+      if (next) cur.end = Math.min(cur.end, next.t);
+      sentences.push({ start: cur.start, end: cur.end, text: cur.text.join(" ") });
+      cur = null;
+    });
+    return { words, sentences, punctuated };
   }
 
   function segmentsToText(segs) {
@@ -236,8 +279,8 @@
     if (segs) transcript = segmentsToText(segs);
     const transcriptLangCode = baseLang(track?.languageCode) || null;
     const fromDub = !!(segs && data.originalLang && transcriptLangCode && transcriptLangCode !== data.originalLang);
-    const captionTimes = segs ? segs.map((s) => s.t) : []; // caption line starts, for snapping short-version cuts
-    return { ...data, transcript, captionTimes, transcriptLang, transcriptLangCode, transcriptError, autoCaptions, fromDub };
+    const timeline = segs ? buildTimeline(segs) : { words: [], sentences: [], punctuated: false }; // for short-version cuts
+    return { ...data, transcript, ...timeline, transcriptLang, transcriptLangCode, transcriptError, autoCaptions, fromDub };
   }
 
   // ---------- Prompting ----------
@@ -295,9 +338,13 @@ RULES
     }
     if (mode === "cut") {
       return [
-        `Make a short version of this video, about ${fields.cutMinutes} minutes long: pick the moments a viewer needs so that watching only them, back to back, gives them the key information.`,
-        "Rules: chronological order, no overlaps, each moment 10 to 45 seconds long, starting and ending at natural sentence boundaries. Skip intros, sponsor segments, calls to subscribe, recaps and filler. Use only timestamps that appear in the transcript. Rate each moment's importance from 1 (nice to have) to 5 (essential). Offer a few more moments than fit; the least important are dropped to hit the length.",
-        'Reply with only a JSON array and no other text, like: [{"start":"1:05","end":"1:48","title":"3 to 6 word label","importance":4}]'
+        `Make a short version of this video, about ${fields.cutMinutes} minutes long, made of its best moments.`,
+        "First read the whole transcript. Then identify the video's key points: the 5 to 10 most valuable ideas, findings, claims or pieces of advice in the entire video. The best points are often in the middle or near the end, not at the start.",
+        "Rank them from most to least valuable for someone who will not watch the video.",
+        "For each key point give the span where the speaker actually makes it: 10 to 45 seconds, beginning where that thought begins and ending where it ends, never mid-sentence. The transcript may have no punctuation, so judge where each thought starts and stops from the words.",
+        "For each span also copy, exactly as written in the transcript, its first 5 to 8 words and its last 5 to 8 words. These are used to cut precisely.",
+        "Skip intros, sponsor segments, calls to subscribe, recaps and filler.",
+        'Reply with only a JSON array ordered by rank, best first, and no other text, like: [{"rank":1,"start":"4:05","end":"4:40","first_words":"but then came my senior thesis","last_words":"spend a year on it","title":"3 to 6 word label"}]'
       ].join("\n");
     }
     // ask
@@ -720,11 +767,12 @@ RULES
           if (atBottom) thread.scrollTop = thread.scrollHeight;
         });
       };
+      const modelCtx = cut ? withSentenceTranscript(ctx) : ctx;
       const res = builtin
-        ? await builtinChat(ctx, language, state.messages, onDelta, builtinOpts).then(
+        ? await builtinChat(modelCtx, language, state.messages, onDelta, builtinOpts).then(
             (text) => ({ ok: true, text }),
             (e) => ({ ok: false, error: builtinError(e), partial: latest }))
-        : await sendChat(buildSystem(ctx, language), state.messages, onDelta);
+        : await sendChat(buildSystem(modelCtx, language), state.messages, onDelta);
       cancelAnimationFrame(frame);
       if (!res?.ok) {
         state.messages.pop();
@@ -769,48 +817,108 @@ RULES
     return sec < 60 ? `${sec} s` : `${Math.floor(sec / 60)} min ${String(sec % 60).padStart(2, "0")} s`;
   };
 
-  // Turn the model's JSON into playable segments: snap to caption line starts (so cuts land on sentence
-  // edges), drop anything invalid or tiny, merge overlaps, then fit the requested length. Models are bad at
-  // adding up durations, so the length is enforced here: long moments are trimmed at a caption boundary,
-  // and the most important moments are kept until the budget is used, then played in order.
+  const normWord = (w) => String(w).toLowerCase().replace(/[^\p{L}\p{N}']/gu, "");
+
+  // Where a quoted run of words occurs in the timeline near time `near` (within 45 s): its first word's
+  // start, or (atEnd) its last word's end. Needs 3+ words in order (or all of a shorter quote).
+  function findPhrase(words, phrase, near, atEnd) {
+    const want = String(phrase || "").split(/\s+/).map(normWord).filter(Boolean);
+    if (want.length < 2 || !Number.isFinite(near)) return null;
+    let best = null;
+    for (let i = 0; i < words.length; i++) {
+      if (Math.abs(words[i].t - near) > 45) continue;
+      let k = 0, j = i;
+      while (k < want.length && j < words.length) {
+        const w = normWord(words[j].text);
+        if (w && w !== want[k]) break;
+        if (w) k++;
+        j++;
+      }
+      if (k < Math.min(3, want.length)) continue;
+      const score = k * 100 - Math.abs(words[i].t - near);
+      if (!best || score > best.score) best = { score, t: words[i].t, end: words[j - 1].end };
+    }
+    return best ? (atEnd ? best.end : best.t) : null;
+  }
+
+  // Turn the model's JSON (key points ranked best first) into playable segments: snap each to full
+  // sentences, drop anything invalid or tiny, merge overlaps, then fit the requested length. Models are bad
+  // at adding up durations, so the length is enforced here: long points are cut back to their last full
+  // sentence that fits, and points are kept in rank order until the budget is used, then played in order.
   function parseCut(text, ctx, targetSeconds = Infinity) {
     let raw;
     try { raw = JSON.parse(text.match(/\[[\s\S]*\]/)?.[0]); } catch { return []; }
     if (!Array.isArray(raw)) return [];
-    const times = ctx.captionTimes || [];
+    const sents = ctx.sentences || [];
+    const words = ctx.words || [];
     const dur = ctx.lengthSeconds || Infinity;
-    const snapStart = (t) => times.filter((x) => x <= t + 1).at(-1) ?? t;
-    const snapEnd = (t) => Math.min(times.find((x) => x >= t) ?? t, dur);
+    // The last sentence starting at or before t. The transcript shows times rounded down to the second
+    // (a sentence starting at 19.6 s is listed as 0:19), so model-given times get up to a second of slack.
+    const sentenceAt = (t, slack = 0) => {
+      let found = null;
+      for (const s of sents) { if (s.start <= t + slack) found = s; else break; }
+      return found || sents[0];
+    };
+    // Exact times from the quoted words when they can be found near the model's time; then, on punctuated
+    // captions, widen to the full sentence. Without punctuation the quote itself marks the thought.
+    const cutStart = (t, quote) => {
+      const exact = findPhrase(words, quote, t, false);
+      if (exact == null) return sents.length ? sentenceAt(t, 1).start : t;
+      return ctx.punctuated ? sentenceAt(exact).start : exact;
+    };
+    const cutEnd = (t, quote) => {
+      const exact = findPhrase(words, quote, t, true);
+      if (exact == null) return Math.min(sents.length ? sentenceAt(t, 1).end : t, dur);
+      return Math.min(ctx.punctuated ? sentenceAt(exact - 0.2).end : exact, dur);
+    };
     const segs = raw
-      .map((r) => ({ start: toSeconds(r?.start), end: toSeconds(r?.end), title: String(r?.title || "").trim().slice(0, 60),
-        importance: Math.min(5, Math.max(1, Number(r?.importance) || 3)) }))
-      // judge length on the model's own times: snapping can stretch a 1-second blip to a whole caption line
+      .map((r, i) => ({ start: toSeconds(r?.start), end: toSeconds(r?.end), title: String(r?.title || "").trim().slice(0, 60),
+        rank: Number(r?.rank) || i + 1, first: r?.first_words, last: r?.last_words }))
+      // judge length on the model's own times: snapping can stretch a 1-second blip to a whole sentence
       .filter((s) => Number.isFinite(s.start) && Number.isFinite(s.end) && s.start >= 0 && s.start < dur && s.end - s.start >= 3)
-      .map((s) => ({ ...s, start: snapStart(s.start), end: snapEnd(s.end) }))
+      .map(({ first, last, ...s }) => ({ ...s, start: cutStart(s.start, first), end: cutEnd(s.end, last) }))
+      .filter((s) => s.end - s.start >= 3)
       .sort((a, b) => a.start - b.start);
     const merged = [];
     for (const s of segs) {
       const last = merged.at(-1);
       if (last && s.start <= last.end + 1) {
         last.end = Math.max(last.end, s.end);
-        last.importance = Math.max(last.importance, s.importance);
+        if (s.rank < last.rank) Object.assign(last, { rank: s.rank, title: s.title || last.title });
       } else merged.push(s);
     }
     if (!Number.isFinite(targetSeconds)) return merged;
 
-    // Trim long moments to a caption boundary: a few short moments beat one long one.
+    // Cut long points back to the last full sentence that fits (never mid-sentence: an overlong single
+    // sentence is kept whole).
     const maxLen = Math.min(90, Math.max(20, targetSeconds * 0.4));
     for (const s of merged) {
       if (s.end - s.start <= maxLen) continue;
-      s.end = times.filter((x) => x > s.start + 10 && x <= s.start + maxLen).at(-1) ?? s.start + maxLen;
+      const inside = sents.filter((x) => x.start >= s.start - 0.01 && x.end <= s.end + 0.01);
+      if (!inside.length) { s.end = s.start + maxLen; continue; }
+      s.end = inside.filter((x) => x.end <= s.start + maxLen).at(-1)?.end ?? inside[0].end;
     }
-    // Most important first (earlier wins ties); keep whatever fits in the budget.
+    // Best first; keep whatever fits in the budget.
     const budget = targetSeconds * 1.1;
     let used = 0;
-    const kept = [...merged].sort((a, b) => b.importance - a.importance || a.start - b.start)
+    const kept = [...merged].sort((a, b) => a.rank - b.rank || a.start - b.start)
       .filter((s) => used + (s.end - s.start) <= budget && (used += s.end - s.start, true));
-    if (!kept.length && merged.length) kept.push({ ...merged[0], end: Math.min(merged[0].end, merged[0].start + budget) });
-    return kept.sort((a, b) => a.start - b.start);
+    if (!kept.length && merged.length) {
+      const best = [...merged].sort((a, b) => a.rank - b.rank)[0];
+      kept.push({ ...best, end: Math.min(best.end, best.start + budget) });
+    }
+    // A little lead-in and tail so the first and last words aren't clipped.
+    return kept.sort((a, b) => a.start - b.start)
+      .map((s) => ({ ...s, start: Math.max(0, s.start - 0.15), end: Math.min(s.end + 0.3, dur) }));
+  }
+
+  // For picking cut points the model needs a time per sentence, not one per 20-second block.
+  function withSentenceTranscript(ctx) {
+    if (!ctx.sentences?.length) return ctx;
+    const text = ctx.sentences.map((s) => `[${fmtTime(s.start)}] ${s.text}`).join("\n");
+    // ponytail: very long videos fall back to the 20-second blocks; split the request if that hurts quality.
+    if (text.length > MAX_TRANSCRIPT_CHARS) return ctx;
+    return { ...ctx, transcript: text, builtinTranscript: undefined };
   }
 
   function cutMarkdown(segs, total) {
@@ -818,7 +926,7 @@ RULES
     return [
       `**Short version: ${fmtDuration(len)}${total ? ` instead of ${fmtDuration(total)}` : ""}** (${segs.length} parts)`,
       "",
-      ...segs.map((s, i) => `${i + 1}. [${fmtTime(s.start)}] ${s.title || "Untitled"} (${fmtDuration(s.end - s.start)})`)
+      ...segs.map((s, i) => `${i + 1}. [${fmtTime(s.start)}] ${s.title || "Untitled"} (${fmtDuration(s.end - s.start)}${s.rank ? `, key point #${s.rank}` : ""})`)
     ].join("\n");
   }
 
