@@ -236,7 +236,8 @@
     if (segs) transcript = segmentsToText(segs);
     const transcriptLangCode = baseLang(track?.languageCode) || null;
     const fromDub = !!(segs && data.originalLang && transcriptLangCode && transcriptLangCode !== data.originalLang);
-    return { ...data, transcript, transcriptLang, transcriptLangCode, transcriptError, autoCaptions, fromDub };
+    const captionTimes = segs ? segs.map((s) => s.t) : []; // caption line starts, for snapping short-version cuts
+    return { ...data, transcript, captionTimes, transcriptLang, transcriptLangCode, transcriptError, autoCaptions, fromDub };
   }
 
   // ---------- Prompting ----------
@@ -290,6 +291,13 @@ RULES
         `Here is how I want it framed: ${framing}.`,
         "Build the explanation around analogies from that world. For each core idea: state it plainly, give the analogy, then say exactly where the analogy maps and where it breaks. Avoid jargon unless you define it right away. Include timestamps for where each idea appears in the video.",
         "Finish with a section called 'The gist' that is one or two sentences I could repeat to a friend."
+      ].join("\n");
+    }
+    if (mode === "cut") {
+      return [
+        `Make a short version of this video: pick the moments a viewer needs so that watching only them, back to back, gives them the key information. Aim for about ${fields.cutMinutes} minutes in total; less is fine if the video has less substance.`,
+        "Rules: chronological order, no overlaps, each moment at least 10 seconds long and starting and ending at natural sentence boundaries. Skip intros, sponsor segments, calls to subscribe, recaps and filler. Use only timestamps that appear in the transcript.",
+        'Reply with only a JSON array and no other text, like: [{"start":"1:05","end":"1:48","title":"3 to 6 word label"}]'
       ].join("\n");
     }
     // ask
@@ -486,14 +494,14 @@ RULES
     return wrap;
   }
 
-  function addMessage(role, content, { pending = false } = {}) {
+  function addMessage(role, content, { pending = false, cut = null } = {}) {
     const thread = $("#yta-thread");
     const msg = el("div", { class: `yta-msg yta-${role}` });
     if (pending) {
       msg.classList.add("yta-pending");
       msg.append(el("span", { class: "yta-dots" }, el("i"), el("i"), el("i")));
     } else if (role === "assistant") {
-      fillAssistant(msg, content);
+      fillAssistant(msg, content, { cut });
     } else {
       msg.append(el("p", { text: content }));
     }
@@ -502,10 +510,16 @@ RULES
     return msg;
   }
 
-  function fillAssistant(msg, content, { streaming = false } = {}) {
+  function fillAssistant(msg, content, { streaming = false, cut = null } = {}) {
     msg.classList.remove("yta-pending");
     msg.replaceChildren(renderMarkdown(content));
     if (streaming) return;
+    if (cut) {
+      const btn = el("button", { class: "yta-primary yta-cut-btn", text: "▶ Play short version",
+        onclick: () => (activeCut?.segs === cut ? stopCut("Stopped the short version.") : playCut(cut)) });
+      btn.ytaCut = cut;
+      msg.append(btn);
+    }
     const tools = el("div", { class: "yta-tools" });
     tools.append(el("button", { class: "yta-mini", text: "Copy", onclick: () => navigator.clipboard.writeText(content) }));
     msg.append(tools);
@@ -550,7 +564,8 @@ RULES
     const modes = [
       ["summarize", "Summarize", "Skip the video, get the info"],
       ["explain", "Explain", "Understand it with your analogies"],
-      ["ask", "Ask an expert", "Commentary through a lens you pick"]
+      ["ask", "Ask an expert", "Commentary through a lens you pick"],
+      ["cut", "Watch short", "Play only the key moments"]
     ];
     for (const [id, label, sub] of modes) {
       tabs.append(el("button", { class: "yta-tab", "data-mode": id, onclick: () => setMode(id) },
@@ -570,6 +585,12 @@ RULES
       el("div", { class: "yta-fields", "data-mode": "ask" },
         el("input", { id: "yta-persona", placeholder: "Expert lens (e.g. a vocal coach analyzing live performances)" }),
         el("input", { id: "yta-question", placeholder: "Optional question (e.g. how is she handling the belt in the chorus?)" })),
+      // cut
+      el("div", { class: "yta-fields", "data-mode": "cut" },
+        el("select", { id: "yta-cut-len", "aria-label": "Length of the short version" },
+          el("option", { value: "2", text: "About 2 minutes" }),
+          el("option", { value: "5", text: "About 5 minutes", selected: "" }),
+          el("option", { value: "10", text: "About 10 minutes" }))),
       el("div", { class: "yta-actions" },
         el("button", { id: "yta-run", class: "yta-primary", text: "Go", onclick: runMode }),
         el("span", { class: "yta-hint", id: "yta-hint" })),
@@ -600,6 +621,7 @@ RULES
     const hint = $("#yta-hint");
     hint.textContent = mode === "summarize" ? "Get the info without watching."
       : mode === "explain" ? "Blank = your default framing from settings."
+      : mode === "cut" ? "Plays just the key moments, back to back."
       : "Blank = your default lens from settings.";
     const input = $(`#yta-panel .yta-fields[data-mode="${mode}"] input`);
     if (input && !$("#yta-panel").classList.contains("yta-collapsed")) input.focus();
@@ -642,13 +664,15 @@ RULES
       focus: $("#yta-focus").value.trim(),
       framing: $("#yta-framing").value.trim() || cfg.analogyDomain || "",
       persona: $("#yta-persona").value.trim() || cfg.persona || "",
-      question: $("#yta-question").value.trim()
+      question: $("#yta-question").value.trim(),
+      cutMinutes: Number($("#yta-cut-len").value) || 5
     };
     const task = buildTask(mode, fields);
     const label = mode === "summarize" ? "Summarize" + (fields.focus ? `: ${fields.focus}` : "")
       : mode === "explain" ? fields.framing ? `Explain: ${fields.framing}` : "Explain simply"
+      : mode === "cut" ? `Watch short: about ${fields.cutMinutes} minutes`
       : `Ask an expert: ${[fields.persona && `As ${fields.persona.replace(/^as\s+/i, "")}`, fields.question].filter(Boolean).join(", ") || "general commentary"}`;
-    await ask(task, label, cfg.language, builtinReady);
+    await ask(task, label, cfg.language, builtinReady, { cut: mode === "cut" });
   }
 
   async function sendFollowup() {
@@ -663,7 +687,7 @@ RULES
     await ask(q, q, cfg.language, builtinReady);
   }
 
-  async function ask(userContent, displayLabel, language, builtinReady) {
+  async function ask(userContent, displayLabel, language, builtinReady, { cut = false } = {}) {
     const configured = await chrome.runtime.sendMessage({ type: "isConfigured" });
     if (!configured?.ok) {
       addMessage("assistant", "**No AI is set up.** Click ⚙ and choose Chrome built-in AI (free, no key) or add an API key.");
@@ -677,11 +701,17 @@ RULES
       const builtin = configured.provider === "builtin";
       const builtinOpts = builtin ? await builtinReady : null; // model ready before the slower caption fetch
       const ctx = await ensureContext();
+      if (cut && !ctx.transcript) {
+        pending.remove();
+        addMessage("assistant", "The short version needs the video's captions, and none could be read for this video.");
+        return;
+      }
       state.messages.push({ role: "user", content: userContent, label: displayLabel });
       const thread = $("#yta-thread");
       let frame = 0, latest = "";
       const onDelta = (text) => {
         latest = text;
+        if (cut) return; // the reply is JSON; keep the dots until it's turned into segments
         // Re-render at most once per frame; only follow the bottom if the reader is already there.
         frame ||= requestAnimationFrame(() => {
           frame = 0;
@@ -701,6 +731,19 @@ RULES
         if (res?.partial) fillAssistant(pending, res.partial);
         else pending.remove();
         addMessage("assistant", builtin ? res.error : `**Error:** ${res?.error || "unknown"}\n\nCheck your key and model in ⚙ settings.`);
+      } else if (cut) {
+        const segs = parseCut(res.text, ctx);
+        if (!segs.length) {
+          state.messages.pop();
+          pending.remove();
+          addMessage("assistant", "Couldn't pick the key moments from the AI's answer. Press Go to try again.");
+        } else {
+          const content = cutMarkdown(segs, ctx.lengthSeconds);
+          state.messages.push({ role: "assistant", content, cut: segs });
+          fillAssistant(pending, content, { cut: segs });
+          saveHistory();
+          setStatus("Short version ready", "yta-ok");
+        }
       } else {
         state.messages.push({ role: "assistant", content: res.text });
         fillAssistant(pending, res.text);
@@ -714,6 +757,97 @@ RULES
       state.busy = false;
       $("#yta-run").disabled = false;
     }
+  }
+
+  // ---------- Short version: play only the key moments ----------
+
+  const toSeconds = (v) => (typeof v === "number" ? v : parseTime(String(v ?? "").replace(/[^\d:]/g, "") || "NaN"));
+
+  // "1 min 05 s" rather than "1:05", so durations aren't turned into clickable timestamps.
+  const fmtDuration = (sec) => {
+    sec = Math.round(sec);
+    return sec < 60 ? `${sec} s` : `${Math.floor(sec / 60)} min ${String(sec % 60).padStart(2, "0")} s`;
+  };
+
+  // Turn the model's JSON into playable segments: snap to caption line starts (so cuts land on sentence
+  // edges), drop anything invalid or tiny, sort, and merge overlaps.
+  function parseCut(text, ctx) {
+    let raw;
+    try { raw = JSON.parse(text.match(/\[[\s\S]*\]/)?.[0]); } catch { return []; }
+    if (!Array.isArray(raw)) return [];
+    const times = ctx.captionTimes || [];
+    const dur = ctx.lengthSeconds || Infinity;
+    const snapStart = (t) => times.filter((x) => x <= t + 1).at(-1) ?? t;
+    const snapEnd = (t) => Math.min(times.find((x) => x >= t) ?? t, dur);
+    const segs = raw
+      .map((r) => ({ start: toSeconds(r?.start), end: toSeconds(r?.end), title: String(r?.title || "").trim().slice(0, 60) }))
+      // judge length on the model's own times: snapping can stretch a 1-second blip to a whole caption line
+      .filter((s) => Number.isFinite(s.start) && Number.isFinite(s.end) && s.start >= 0 && s.start < dur && s.end - s.start >= 3)
+      .map((s) => ({ ...s, start: snapStart(s.start), end: snapEnd(s.end) }))
+      .sort((a, b) => a.start - b.start);
+    const merged = [];
+    for (const s of segs) {
+      const last = merged.at(-1);
+      if (last && s.start <= last.end + 1) last.end = Math.max(last.end, s.end);
+      else merged.push(s);
+    }
+    return merged;
+  }
+
+  function cutMarkdown(segs, total) {
+    const len = segs.reduce((sum, s) => sum + s.end - s.start, 0);
+    return [
+      `**Short version: ${fmtDuration(len)}${total ? ` instead of ${fmtDuration(total)}` : ""}** (${segs.length} parts)`,
+      "",
+      ...segs.map((s, i) => `${i + 1}. [${fmtTime(s.start)}] ${s.title || "Untitled"} (${fmtDuration(s.end - s.start)})`)
+    ].join("\n");
+  }
+
+  let activeCut = null;
+
+  function playCut(segs) {
+    stopCut();
+    const video = $("video");
+    if (!video) return;
+    const label = el("div", { id: "yta-cut-label" });
+    $("#movie_player")?.append(label);
+    const cut = activeCut = { segs, i: 0, video, label };
+    const go = (i) => {
+      cut.i = i;
+      video.currentTime = segs[i].start;
+      video.play?.();
+      const text = `Short version · ${i + 1} of ${segs.length}${segs[i].title ? " · " + segs[i].title : ""}`;
+      label.textContent = text;
+      setStatus(text, "yta-ok");
+    };
+    cut.onTime = () => {
+      if ($(".ad-showing")) return;
+      const s = segs[cut.i], t = video.currentTime;
+      // The viewer jumped somewhere else themselves: hand control back to them.
+      if (t < s.start - 3 || t > s.end + 3) return stopCut("Stopped the short version because you jumped elsewhere.");
+      if (t < s.end) return;
+      if (cut.i + 1 < segs.length) go(cut.i + 1);
+      else { video.pause(); stopCut("That's the short version. Press play to keep watching from here."); }
+    };
+    video.addEventListener("timeupdate", cut.onTime);
+    go(0);
+    syncCutButtons();
+  }
+
+  function stopCut(message) {
+    if (!activeCut) return;
+    activeCut.video.removeEventListener("timeupdate", activeCut.onTime);
+    activeCut.label.remove();
+    activeCut = null;
+    syncCutButtons();
+    if (message) setStatus(message, "yta-ok");
+  }
+
+  // Only one short version plays at a time; its button becomes Stop.
+  function syncCutButtons() {
+    document.querySelectorAll("#yta-panel .yta-cut-btn").forEach((btn) => {
+      btn.textContent = btn.ytaCut === activeCut?.segs ? "■ Stop" : "▶ Play short version";
+    });
   }
 
   // ---------- History ----------
@@ -730,7 +864,7 @@ RULES
     const saved = (await chrome.storage.local.get(historyKey(videoId)))[historyKey(videoId)];
     if (!saved?.length || state?.videoId !== videoId || state.messages.length) return;
     state.messages = saved;
-    for (const m of saved) addMessage(m.role, m.role === "user" ? m.label || m.content : m.content);
+    for (const m of saved) addMessage(m.role, m.role === "user" ? m.label || m.content : m.content, { cut: m.cut });
   }
 
   function clearHistory() {
@@ -763,6 +897,7 @@ RULES
     if (!videoId) { existing?.remove(); state = null; return; }
     if (state && state.videoId === videoId && existing && existing.isConnected) return;
 
+    stopCut();
     existing?.remove();
     state = { videoId, mode: "summarize", ctx: null, ctxPromise: null, messages: [], busy: false };
 

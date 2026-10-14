@@ -58,7 +58,7 @@ html[dark] #yta-panel {
 #yta-panel .yta-body { padding: 0 14px 14px; }
 
 #yta-panel .yta-tabs {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-bottom: 10px;
+  display: grid; grid-template-columns: repeat(4, auto); justify-content: space-between; gap: 4px; margin-bottom: 10px;
   padding: 4px; border-radius: 10px; background: var(--yta-card); border: 1px solid var(--yta-line);
 }
 #yta-panel .yta-tab {
@@ -74,7 +74,7 @@ html[dark] #yta-panel {
 #yta-panel .yta-form { display: flex; flex-direction: column; gap: 8px; }
 #yta-panel .yta-fields { display: none; flex-direction: column; gap: 8px; }
 #yta-panel .yta-fields.yta-show { display: flex; }
-#yta-panel input {
+#yta-panel input, #yta-panel select {
   width: 100%; padding: 9px 12px; border: 1px solid var(--yta-line); border-radius: 8px;
   background: var(--yta-card); color: var(--yta-fg); font: inherit; outline: none;
 }
@@ -141,4 +141,13 @@ ytd-watch-flexy:not([theater]):not([fullscreen]) #secondary #yta-panel:not(.yta-
 }
 ytd-watch-flexy:not([theater]):not([fullscreen]) #secondary #yta-panel:not(.yta-collapsed) .yta-thread {
   flex: 1; min-height: 0; max-height: none;
+}
+
+/* Short version */
+#yta-panel .yta-cut-btn { margin-top: 10px; }
+#yta-cut-label {
+  position: absolute; top: 14px; left: 14px; z-index: 60; max-width: calc(100% - 28px);
+  padding: 6px 12px; border-radius: 16px; background: rgba(0, 0, 0, .75); color: #fff;
+  font: 600 13px "Roboto", "Arial", sans-serif; pointer-events: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
