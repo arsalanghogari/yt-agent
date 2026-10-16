@@ -9,7 +9,8 @@ A study companion in a panel next to the YouTube player, for learning from the v
 5. **Mind maps**: from the Notes tab, the whole video as a mind map (topic → main ideas → details), each linked to its moment.
 6. **Library**: every video you've studied in one page, with search, its notes, mind map, flashcards, quiz and chat. Open it from the 📚 button in the panel or the toolbar icon.
 7. **Share study packs**: from the library, download one file with a video's notes, mind map, flashcards and quiz that anyone can open in a browser, no extension needed.
-8. **Daily review**: flashcards from every video you've studied, shown when they're due (spaced repetition: Again / Good / Easy). The **Review** button shows how many are due.
+8. **Playlists as courses**: on a video opened from a playlist, **Study as a course** tracks your progress through it (videos you watch 90% of are marked done), with the full list, **Next video**, and a Courses section in the library.
+9. **Daily review**: flashcards from every video you've studied, shown when they're due (spaced repetition: Again / Good / Easy). The **Review** button shows how many are due.
 
 Answers stream in as they are written. Every timestamp in an answer is clickable and seeks the player. Follow-up questions keep the thread going, and each video's chat is saved so it is still there when you come back (🗑 clears it).
 

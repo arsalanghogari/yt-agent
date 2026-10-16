@@ -536,7 +536,6 @@ RULES
         el("button", { class: "yta-review-btn", id: "yta-review", title: "Review the flashcards that are due today", onclick: startReview },
           icon("review", 16), el("span", { text: "Review" }), el("span", { class: "yta-badge", id: "yta-due", hidden: "" })),
         el("button", { class: "yta-icon", title: "Your library: every video you've studied", "aria-label": "Open your library", onclick: () => openLibrary() }, icon("library")),
-        el("button", { class: "yta-icon", title: "Clear this tab's conversation", "aria-label": "Clear this tab's conversation", onclick: clearHistory }, icon("trash")),
         el("button", { class: "yta-icon", title: "Settings", "aria-label": "Settings", onclick: () => alive() && chrome.runtime.sendMessage({ type: "openOptions" }) }, icon("gear")),
         el("button", { class: "yta-icon", id: "yta-toggle", title: "Expand / collapse", "aria-label": "Expand or collapse", onclick: () => panel.classList.toggle("yta-collapsed") }, icon("chevron"))
       )
@@ -594,7 +593,11 @@ RULES
       el("button", { class: "yta-link-btn", text: "Want sharper answers? Add your own AI key",
         onclick: () => alive() && chrome.runtime.sendMessage({ type: "openOptions" }) }));
 
-    const body = el("div", { class: "yta-body" }, tabs, form, thread, intro, chatBox, upsell);
+    const course = el("div", { class: "yta-course", id: "yta-course", hidden: "" });
+
+    const clear = el("button", { class: "yta-mini yta-clear", text: "Clear this tab", title: "Clear this tab's conversation for this video", onclick: clearHistory });
+
+    const body = el("div", { class: "yta-body" }, course, tabs, form, thread, clear, intro, chatBox, upsell);
     panel.append(header, body);
     return panel;
   }
@@ -1070,6 +1073,148 @@ RULES
     show();
   }
 
+  // ---------- Courses: a playlist studied in order ----------
+  // course:<listId> = { listId, title, channel, videos: [{ id, title, length }], done: { videoId: true }, started, updated }
+
+  const courseKey = (listId) => `course:${listId}`;
+
+  // The playlist this video is being watched from. Mixes (RD...), Watch later and Liked aren't courses.
+  function getListId() {
+    const list = new URL(location.href).searchParams.get("list");
+    return list && !/^(RD|WL$|LL$|LM$)/.test(list) ? list : null;
+  }
+
+  const courseUrl = (course, videoId) => `https://www.youtube.com/watch?v=${videoId}&list=${encodeURIComponent(course.listId)}`;
+
+  // Videos from a playlist page's ytInitialData. YouTube has used two shapes: playlistVideoRenderer and
+  // the newer lockupViewModel; walk the whole object so either (or both) are found.
+  // ponytail: only the first page of the playlist (~100 videos); follow the continuation for longer ones.
+  function parsePlaylist(html) {
+    let data;
+    try { data = JSON.parse(String(html).match(/var ytInitialData = (\{.*?\});<\/script>/s)?.[1]); } catch { return null; }
+    if (!data) return null;
+    const videos = [], seen = new Set();
+    const add = (id, title, length) => {
+      if (!/^[\w-]{11}$/.test(id || "") || seen.has(id)) return;
+      seen.add(id);
+      videos.push({ id, title: String(title || "Untitled video").trim(), length: Number(length) || 0 });
+    };
+    let channel = "";
+    (function walk(o) {
+      if (!o || typeof o !== "object") return;
+      const r = o.playlistVideoRenderer;
+      if (r) add(r.videoId, r.title?.runs?.[0]?.text || r.title?.simpleText, r.lengthSeconds);
+      const l = o.lockupViewModel;
+      if (l?.contentType === "LOCKUP_CONTENT_TYPE_VIDEO") {
+        const meta = l.metadata?.lockupMetadataViewModel;
+        const dur = JSON.stringify(l.contentImage || {}).match(/"text":"(\d{1,2}(?::\d{2}){1,2})"/)?.[1];
+        add(l.contentId, meta?.title?.content, dur ? parseTime(dur) : 0);
+        channel ||= meta?.metadata?.contentMetadataViewModel?.metadataRows?.[0]?.metadataParts?.[0]?.text?.content || "";
+      }
+      for (const k in o) if (k !== "playlistVideoRenderer" && k !== "lockupViewModel") walk(o[k]);
+    })(data);
+    const title = data.metadata?.playlistMetadataRenderer?.title || "Playlist";
+    return videos.length ? { title, channel, videos } : null;
+  }
+
+  async function fetchPlaylist(listId) {
+    const res = await fetch(`https://www.youtube.com/playlist?list=${encodeURIComponent(listId)}&hl=en`, { credentials: "include" });
+    return parsePlaylist(await res.text());
+  }
+
+  const courseProgress = (course) => course.videos.filter((v) => course.done[v.id]).length;
+  // The first unfinished video after this one, else the first unfinished one at all.
+  function nextInCourse(course, currentId) {
+    const i = course.videos.findIndex((v) => v.id === currentId);
+    const after = [...course.videos.slice(i + 1), ...course.videos.slice(0, Math.max(0, i))];
+    return after.find((v) => !course.done[v.id]) || null;
+  }
+
+  const playlistPreview = new Map(); // listId -> playlist, so the offer doesn't refetch on every video
+
+  async function syncCourse() {
+    const bar = $("#yta-course");
+    const listId = getListId();
+    if (!bar || !alive()) return;
+    if (!listId) { bar.hidden = true; return; }
+    const course = (await chrome.storage.local.get(courseKey(listId)))[courseKey(listId)];
+    if (state?.listId !== listId) return;
+    if (course) return renderCourse(bar, course);
+    // Not started: offer it once we know the playlist (fetched once per page session).
+    let pl = playlistPreview.get(listId);
+    if (pl === undefined) {
+      pl = await fetchPlaylist(listId).catch(() => null);
+      playlistPreview.set(listId, pl);
+    }
+    if (!pl || pl.videos.length < 2 || state?.listId !== listId) { bar.hidden = true; return; }
+    bar.hidden = false;
+    bar.replaceChildren(
+      el("div", { class: "yta-course-row" }, icon("library", 16),
+        el("span", { class: "yta-course-text" }, "Part of ", el("strong", { text: pl.title }), ` (${pl.videos.length} videos)`)),
+      el("button", { class: "yta-primary yta-course-start", onclick: () => startCourse(listId, pl) }, icon("spark", 15), el("span", { text: "Study as a course" })));
+  }
+
+  async function startCourse(listId, pl) {
+    if (!alive()) return;
+    const course = { listId, title: pl.title, channel: pl.channel, videos: pl.videos, done: {}, started: Date.now(), updated: Date.now() };
+    await chrome.storage.local.set({ [courseKey(listId)]: course });
+    setStatus("Course started", "yta-ok");
+    syncCourse();
+  }
+
+  async function setDone(listId, videoId, done) {
+    if (!alive()) return;
+    const key = courseKey(listId);
+    const course = (await chrome.storage.local.get(key))[key];
+    if (!course || !!course.done[videoId] === done) return;
+    if (done) course.done[videoId] = true; else delete course.done[videoId];
+    course.updated = Date.now();
+    await chrome.storage.local.set({ [key]: course });
+    if (state?.listId === listId) renderCourse($("#yta-course"), course);
+  }
+
+  function renderCourse(bar, course) {
+    bar.hidden = false;
+    const n = courseProgress(course), total = course.videos.length;
+    const here = course.videos.findIndex((v) => v.id === state.videoId);
+    const done = !!course.done[state.videoId];
+    const next = nextInCourse(course, state.videoId);
+    const list = el("ol", { class: "yta-course-list", hidden: "" }, ...course.videos.map((v, i) =>
+      el("li", { class: `${course.done[v.id] ? "yta-done" : ""} ${i === here ? "yta-here" : ""}` },
+        el("span", { class: "yta-check", "aria-label": course.done[v.id] ? "Done" : "Not done yet" }, course.done[v.id] ? "✓" : String(i + 1)),
+        el("a", { href: courseUrl(course, v.id), text: v.title }),
+        v.length ? el("small", { text: fmtTime(v.length) }) : null)));
+    const toggle = el("button", { class: "yta-icon yta-course-toggle", "aria-expanded": "false", title: "Show all videos", "aria-label": "Show all videos" }, icon("chevron", 16));
+    toggle.addEventListener("click", () => {
+      list.hidden = !list.hidden;
+      toggle.setAttribute("aria-expanded", String(!list.hidden));
+    });
+    bar.replaceChildren(
+      el("div", { class: "yta-course-row" }, icon("library", 16),
+        el("span", { class: "yta-course-text" }, el("strong", { text: course.title })),
+        el("span", { class: "yta-course-count", text: `${n} of ${total}` }), toggle),
+      el("div", { class: "yta-progress", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": String(total), "aria-valuenow": String(n), "aria-label": "Course progress" },
+        el("span", { style: `width:${Math.round((n / total) * 100)}%` })),
+      el("div", { class: "yta-course-actions" },
+        here >= 0 ? el("button", { class: "yta-secondary", onclick: () => setDone(course.listId, state.videoId, !done) }, done ? "✓ Done" : "Mark done") : null,
+        next ? el("a", { class: "yta-primary", href: courseUrl(course, next.id) }, el("span", { text: here >= 0 ? "Next video" : "Continue" }), icon("play", 13))
+          : el("span", { class: "yta-course-finished", text: n === total ? "Course complete. Nice work!" : "" })),
+      list);
+  }
+
+  // Watching 90% of a course video marks it done.
+  document.addEventListener("timeupdate", (e) => {
+    const v = e.target;
+    if (!(v instanceof HTMLVideoElement) || !state?.listId || $(".ad-showing")) return;
+    if (v.duration > 30 && v.currentTime / v.duration >= 0.9 && !state.markedDone) {
+      state.markedDone = true;
+      setDone(state.listId, state.videoId, true);
+    }
+  }, true);
+  chrome.storage.onChanged.addListener((changes) => {
+    if (state?.listId && courseKey(state.listId) in changes) syncCourse();
+  });
+
   // ---------- History ----------
   // ponytail: one key per video, never evicted; add LRU pruning if chrome.storage.local (10 MB) fills up.
 
@@ -1147,7 +1292,7 @@ RULES
     if (state && state.videoId === videoId && existing && existing.isConnected) return;
 
     existing?.remove();
-    state = { videoId, mode: "chat", ctx: null, ctxPromise: null, threads: emptyThreads(), boxes: {}, busy: false };
+    state = { videoId, listId: getListId(), markedDone: false, mode: "chat", ctx: null, ctxPromise: null, threads: emptyThreads(), boxes: {}, busy: false };
 
     const tryMount = () => {
       const mp = findMountPoint();
@@ -1164,6 +1309,7 @@ RULES
       restoreHistory(videoId);
       updateDueBadge();
       syncUpsell();
+      syncCourse();
       // Warm the transcript in the background so the first request is fast.
       ensureContext().catch(() => {});
     };

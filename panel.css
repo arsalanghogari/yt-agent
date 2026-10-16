@@ -119,6 +119,35 @@ html[dark] #yta-panel .yta-primary, html[dark] #yta-panel .yta-send { --yta-acce
 }
 #yta-panel .yta-tab.yta-active .yta-ico { color: var(--yta-accent); }
 
+/* ---------- Course bar (playlist studied as a course) ---------- */
+#yta-panel .yta-course { margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--yta-line); border-radius: 12px; background: var(--yta-raised); }
+#yta-panel .yta-course[hidden] { display: none; }
+#yta-panel .yta-course-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+#yta-panel .yta-course-row > .yta-ico { color: var(--yta-accent); }
+#yta-panel .yta-course-text { flex: 1; min-width: 0; font-size: 13px; color: var(--yta-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#yta-panel .yta-course-text strong { color: var(--yta-ink); }
+#yta-panel .yta-course-count { flex: none; font-size: 12.5px; font-weight: 600; color: var(--yta-muted); font-variant-numeric: tabular-nums; }
+#yta-panel .yta-course-toggle { width: 28px; height: 28px; }
+#yta-panel .yta-course-toggle[aria-expanded="true"] { transform: rotate(180deg); }
+#yta-panel .yta-course-start { width: 100%; margin-top: 10px; }
+#yta-panel .yta-course .yta-progress { margin: 8px 0 10px; }
+#yta-panel .yta-course-actions { display: flex; align-items: center; gap: 8px; }
+#yta-panel .yta-course-actions a.yta-primary { margin-left: auto; text-decoration: none; }
+#yta-panel .yta-course-finished { margin-left: auto; font-size: 13px; font-weight: 600; color: var(--yta-good); }
+#yta-panel .yta-course-list { margin: 10px 0 0; padding: 0; list-style: none; max-height: 240px; overflow-y: auto; }
+#yta-panel .yta-course-list[hidden] { display: none; }
+#yta-panel .yta-course-list li { display: flex; align-items: center; gap: 8px; padding: 5px 4px; border-radius: 8px; font-size: 13px; }
+#yta-panel .yta-course-list li.yta-here { background: var(--yta-accent-soft); }
+#yta-panel .yta-course-list a { flex: 1; min-width: 0; color: var(--yta-ink); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#yta-panel .yta-course-list a:hover { text-decoration: underline; }
+#yta-panel .yta-course-list small { flex: none; color: var(--yta-muted); font-variant-numeric: tabular-nums; }
+#yta-panel .yta-check {
+  display: grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--yta-track); color: var(--yta-muted); font-size: 10.5px; font-weight: 700;
+}
+#yta-panel .yta-done .yta-check { background: var(--yta-good); color: #fff; }
+#yta-panel .yta-done a { color: var(--yta-muted); }
+
 /* ---------- Action row (Notes, Flashcards, Quiz) ---------- */
 #yta-panel .yta-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
 #yta-panel[data-mode="chat"] .yta-form { margin-top: 0; }
@@ -142,8 +171,8 @@ html[dark] #yta-panel .yta-primary, html[dark] #yta-panel .yta-send { --yta-acce
 #yta-panel .yta-primary:disabled { opacity: .5; cursor: default; transform: none; }
 #yta-panel .yta-go { flex: none; }
 #yta-panel[data-mode="chat"] .yta-go { display: none; }
-#yta-panel .yta-go-map { display: none; flex: none; gap: 6px; height: 36px; border-radius: 18px; }
-#yta-panel[data-mode="notes"] .yta-go-map { display: inline-flex; }
+#yta-panel .yta-form .yta-go-map { display: none; flex: none; gap: 6px; height: 36px; border-radius: 18px; }
+#yta-panel[data-mode="notes"] .yta-form .yta-go-map { display: inline-flex; }
 #yta-panel .yta-secondary {
   display: inline-flex; align-items: center; height: 34px; padding: 0 14px;
   border: 1px solid var(--yta-line); border-radius: 17px; background: var(--yta-raised);
@@ -227,6 +256,8 @@ html[dark] #yta-panel .yta-primary, html[dark] #yta-panel .yta-send { --yta-acce
 #yta-panel .yta-send:hover { background: var(--yta-accent-hover); }
 #yta-panel .yta-send:active { transform: scale(.94); }
 
+#yta-panel .yta-clear { display: block; margin: 8px 0 0 auto; }
+#yta-panel .yta-thread:not(:has(.yta-msgs > *)) ~ .yta-clear { display: none; }
 #yta-panel .yta-upsell { margin: 10px 2px 0; font-size: 12px; color: var(--yta-muted); }
 #yta-panel .yta-upsell[hidden] { display: none; }
 #yta-panel .yta-link-btn {

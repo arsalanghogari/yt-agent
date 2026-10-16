@@ -113,6 +113,24 @@
   .chat .user p { margin: 0; color: var(--ink); }
   .chat .ai { padding: 12px 16px; border: 1px solid var(--line); border-radius: 14px; }
 
+  /* Courses */
+  .thumb { position: relative; }
+  .thumb-count { position: absolute; right: 4px; bottom: 4px; padding: 0 5px; border-radius: 4px; background: rgba(0, 0, 0, .78); color: #fff; font-size: 11px; font-weight: 600; }
+  .bar { display: block; height: 4px; margin-top: 6px; border-radius: 2px; background: var(--track); overflow: hidden; }
+  .bar > span { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
+  .bar.big { height: 6px; margin: 0 0 18px; max-width: 520px; }
+  .complete { align-self: center; color: var(--good); font-weight: 600; }
+  .course-list { margin: 0; padding: 0; list-style: none; max-width: 760px; }
+  .course-list li { display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+  .course-list li a { flex: 1; min-width: 0; color: var(--ink); text-decoration: none; }
+  .course-list li a:hover { text-decoration: underline; }
+  .course-list li.done a { color: var(--muted); }
+  .course-list small { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .check { display: grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 50%; background: var(--track); color: var(--muted); font-size: 11.5px; font-weight: 700; }
+  .done .check { background: var(--good); color: #fff; }
+  .tag-btn { border: 0; cursor: pointer; }
+  .tag-btn:hover { background: var(--accent-soft); color: var(--accent); }
+
   .empty { max-width: 460px; margin: 80px auto; text-align: center; color: var(--muted); }
   .empty h2 { margin: 0 0 8px; color: var(--ink); font-size: 20px; }
   .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 10px 16px; border-radius: 10px; background: var(--ink); color: var(--bg); font-size: 14px; font-weight: 500; }
@@ -132,7 +150,7 @@
   </div>
   <div class="empty" id="empty" hidden>
     <h2>Your library is empty</h2>
-    <p>Open any YouTube video and use Study Pal. Your notes, mind maps, flashcards and quizzes show up here.</p>
+    <p>Open any YouTube video and use Study Pal. Your notes, mind maps, flashcards and quizzes show up here, and playlists you study as courses.</p>
   </div>
   <p class="toast" id="toast" role="status" hidden></p>
   <script src="render.js"></script>

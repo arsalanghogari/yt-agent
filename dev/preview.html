@@ -3,7 +3,7 @@
   Design preview for the Study Pal panel: runs the real content.js and panel.css beside a stand-in
   YouTube player, with fake extension APIs and canned AI replies. Not shipped in the extension.
   Serve the repo root (e.g. `python3 -m http.server 8765`) and open /dev/preview.html.
-  Query options: ?dark (YouTube dark theme), ?empty (no saved chat), ?due=N (cards due in review), ?solo (panel only).
+  Query options: ?dark (YouTube dark theme), ?empty (no saved chat), ?due=N (cards due in review), ?solo (panel only), ?list=PLx (opened from a playlist).
 -->
 <html>
 <head>
@@ -11,6 +11,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Study Pal preview</title>
 <link rel="stylesheet" href="../panel.css">
+<link rel="stylesheet" href="../mindmap.css">
 <style>
   body { margin: 0; background: #fff; font-family: Roboto, Arial, sans-serif; }
   html[dark] body { background: #0f0f0f; color: #f1f1f1; }
@@ -107,6 +108,14 @@
   const realFetch = window.fetch;
   window.fetch = async (url, opts) => {
     if (!String(url).includes("youtube.com")) return realFetch(url, opts);
+    if (String(url).includes("/playlist?")) {
+      const lockup = (id, title, dur) => ({ lockupViewModel: { contentType: "LOCKUP_CONTENT_TYPE_VIDEO", contentId: id, contentImage: { badge: { text: dur } },
+        metadata: { lockupMetadataViewModel: { title: { content: title }, metadata: { contentMetadataViewModel: { metadataRows: [{ metadataParts: [{ text: { content: "Science Lab" } }] }] } } } } } });
+      const titles = ["What is DNA?", "How CRISPR works", "Gene therapy today", "Gene drives", "The ethics of editing", "AI in biology"];
+      const data = { metadata: { playlistMetadataRenderer: { title: "Genetics, explained" } },
+        contents: titles.map((t, i) => lockup(i === 1 ? "prevVideo01" : `prevVid${String(i).padStart(4, "0")}`, t, `${8 + i}:${10 + i * 7}`)) };
+      return new Response(`<script>var ytInitialData = ${JSON.stringify(data)};<\/script>`);
+    }
     const player = { videoDetails: { title: "How CRISPR works", author: "Science Lab", lengthSeconds: "1980", shortDescription: "", keywords: [] },
       captions: { playerCaptionsTracklistRenderer: { captionTracks: [{ baseUrl: "https://www.youtube.com/api/timedtext?v=prevVideo01&lang=en", languageCode: "en", name: { simpleText: "English" } }] } } };
     const captions = { events: [{ tStartMs: 0, segs: [{ utf8: "CRISPR lets us edit DNA." }] }, { tStartMs: 216000, segs: [{ utf8: "Cas9 cuts DNA." }] }] };
@@ -130,6 +139,7 @@
       document.getElementById("primary").style.display = "none";
     }
   </script>
+  <script src="../render.js"></script>
   <script src="../content.js"></script>
 </body>
 </html>

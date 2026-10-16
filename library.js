@@ -13,7 +13,7 @@
   $("settings").append(icon("gear", 20));
   $("settings").addEventListener("click", () => chrome.runtime.openOptionsPage());
 
-  let videos = [], selected = null, tab = null;
+  let videos = [], courses = [], selected = null, selectedCourse = null, tab = null;
 
   const toast = (text) => {
     const t = $("toast");
@@ -51,10 +51,14 @@
       .map((k) => toVideo(k.slice(5), all[k], all[`video:${k.slice(5)}`], deck))
       .filter((v) => v.notes || v.map || v.cards.length || v.quiz || v.chat.length)
       .sort((a, b) => b.updated - a.updated);
+    courses = Object.keys(all).filter((k) => k.startsWith("course:")).map((k) => all[k]).sort((a, b) => b.updated - a.updated);
+    if (selectedCourse) selectedCourse = courses.find((c) => c.listId === selectedCourse.listId) || null;
     const due = deck.filter((c) => c.due <= Date.now()).length;
     $("due").replaceChildren(...(due ? [el("strong", { text: `${due} card${due === 1 ? "" : "s"} due` }), " · review them from the panel on any video"] : []));
     const wanted = location.hash.slice(1);
+    if (wanted.startsWith("course:")) selectedCourse = courses.find((c) => `course:${c.listId}` === wanted) || selectedCourse;
     selected = videos.find((v) => v.id === wanted) || videos.find((v) => v.id === selected?.id) || videos[0] || null;
+    if (!selected && !selectedCourse) selectedCourse = courses[0] || null;
     render();
   }
 
@@ -63,13 +67,15 @@
   function render() {
     const q = $("search").value.trim().toLowerCase();
     const shown = videos.filter((v) => !q || v.search.includes(q));
-    $("empty").hidden = videos.length > 0;
-    $("layout").hidden = videos.length === 0;
+    $("empty").hidden = videos.length > 0 || courses.length > 0;
+    $("layout").hidden = !videos.length && !courses.length;
+    const shownCourses = courses.filter((c) => !q || `${c.title} ${c.channel} ${c.videos.map((v) => v.title).join(" ")}`.toLowerCase().includes(q));
     $("list").replaceChildren(
+      ...(shownCourses.length ? [el("p", { class: "list-head", text: "Courses" }), ...shownCourses.map(courseItem)] : []),
       el("p", { class: "list-head", text: q ? `${shown.length} of ${videos.length} videos` : `${videos.length} video${videos.length === 1 ? "" : "s"} studied` }),
       ...shown.map((v) => {
         const tags = [v.notes && "Notes", v.map && "Mind map", v.cards.length && `${v.cards.length} cards`, v.quiz && "Quiz", v.chat.length && "Chat"].filter(Boolean);
-        return el("button", { class: "video", "aria-current": String(v === selected), onclick: () => select(v) },
+        return el("button", { class: "video", "aria-current": String(!selectedCourse && v === selected), onclick: () => select(v) },
           el("span", { class: "thumb", style: `background-image:url("https://i.ytimg.com/vi/${encodeURIComponent(v.id)}/mqdefault.jpg")` }),
           el("span", {},
             el("p", { class: "video-title", text: v.title }),
@@ -79,7 +85,28 @@
     renderDetail();
   }
 
+  const doneCount = (c) => c.videos.filter((v) => c.done[v.id]).length;
+
+  function courseItem(c) {
+    const n = doneCount(c);
+    return el("button", { class: "video course", "aria-current": String(c === selectedCourse), onclick: () => selectCourse(c) },
+      el("span", { class: "thumb", style: `background-image:url("https://i.ytimg.com/vi/${encodeURIComponent(c.videos[0]?.id || "")}/mqdefault.jpg")` },
+        el("span", { class: "thumb-count", text: `${c.videos.length} videos` })),
+      el("span", {},
+        el("p", { class: "video-title", text: c.title }),
+        el("p", { class: "video-meta", text: [c.channel, `${n} of ${c.videos.length} done`].filter(Boolean).join(" · ") }),
+        el("span", { class: "bar" }, el("span", { style: `width:${Math.round((n / c.videos.length) * 100)}%` }))));
+  }
+
+  function selectCourse(c) {
+    selectedCourse = c;
+    history.replaceState(null, "", `#course:${c.listId}`);
+    render();
+    $("detail").scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
   function select(v) {
+    selectedCourse = null;
     selected = v;
     tab = null;
     history.replaceState(null, "", `#${v.id}`);
@@ -89,7 +116,40 @@
 
   // ---------- Detail ----------
 
+  function renderCourseDetail(c) {
+    const n = doneCount(c), total = c.videos.length;
+    const next = c.videos.find((v) => !c.done[v.id]);
+    const studied = new Map(videos.map((v) => [v.id, v]));
+    const link = (id) => `https://www.youtube.com/watch?v=${id}&list=${encodeURIComponent(c.listId)}`;
+    $("detail").replaceChildren(
+      el("h1", { text: c.title }),
+      el("p", { class: "sub", text: [c.channel, `${n} of ${total} videos done`, `started ${new Date(c.started).toLocaleDateString(undefined, { month: "long", day: "numeric" })}`].filter(Boolean).join(" · ") }),
+      el("div", { class: "bar big" }, el("span", { style: `width:${Math.round((n / total) * 100)}%` })),
+      el("div", { class: "actions" },
+        next ? el("a", { class: "btn primary", href: link(next.id), target: "_blank", rel: "noopener" }, icon("play", 15), n ? "Continue" : "Start watching")
+          : el("span", { class: "complete", text: "Course complete. Nice work!" }),
+        el("button", { class: "btn danger", onclick: () => removeCourse(c) }, icon("trash", 16), "Remove course")),
+      el("ol", { class: "course-list" }, ...c.videos.map((v, i) => {
+        const s = studied.get(v.id);
+        return el("li", { class: c.done[v.id] ? "done" : "" },
+          el("span", { class: "check", text: c.done[v.id] ? "✓" : String(i + 1) }),
+          el("a", { href: link(v.id), target: "_blank", rel: "noopener", text: v.title }),
+          s ? el("button", { class: "tag tag-btn", onclick: () => select(s), title: "See what you made for this video" }, "Your notes") : null,
+          v.length ? el("small", { text: fmtTime(v.length) }) : null);
+      })));
+  }
+
+  async function removeCourse(c) {
+    if (!confirm(`Remove the course "${c.title}"? Your notes and flashcards for its videos stay in your library.`)) return;
+    await chrome.storage.local.remove(`course:${c.listId}`);
+    selectedCourse = null;
+    history.replaceState(null, "", location.pathname);
+    toast("Course removed.");
+    load();
+  }
+
   function renderDetail() {
+    if (selectedCourse) return renderCourseDetail(selectedCourse);
     const v = selected;
     const d = $("detail");
     if (!v) { d.replaceChildren(); return; }
