@@ -519,7 +519,10 @@ RULES
     return wrap;
   }
 
-  function addMessage(role, content, { pending = false, cards = null, quiz = null, notes = false } = {}) {
+  // Each tab keeps its own thread: a container per tab, and only the open tab's is inside #yta-thread.
+  const box = (mode = state.mode) => state.boxes[mode];
+
+  function addMessage(role, content, { pending = false, cards = null, quiz = null, notes = false, to = box() } = {}) {
     const thread = $("#yta-thread");
     const msg = el("div", { class: `yta-msg yta-${role}` });
     if (pending) {
@@ -530,7 +533,7 @@ RULES
     } else {
       msg.append(el("p", { text: content }));
     }
-    thread.append(msg);
+    to.append(msg);
     thread.scrollTop = thread.scrollHeight;
     return msg;
   }
@@ -595,7 +598,7 @@ RULES
       el("div", { class: "yta-header-actions" },
         el("button", { class: "yta-review-btn", id: "yta-review", title: "Review the flashcards that are due today", onclick: startReview },
           icon("review", 16), el("span", { text: "Review" }), el("span", { class: "yta-badge", id: "yta-due", hidden: "" })),
-        el("button", { class: "yta-icon", title: "Clear this video's chat", "aria-label": "Clear this video's chat", onclick: clearHistory }, icon("trash")),
+        el("button", { class: "yta-icon", title: "Clear this tab's conversation", "aria-label": "Clear this tab's conversation", onclick: clearHistory }, icon("trash")),
         el("button", { class: "yta-icon", title: "Settings", "aria-label": "Settings", onclick: () => alive() && chrome.runtime.sendMessage({ type: "openOptions" }) }, icon("gear")),
         el("button", { class: "yta-icon", id: "yta-toggle", title: "Expand / collapse", "aria-label": "Expand or collapse", onclick: () => panel.classList.toggle("yta-collapsed") }, icon("chevron"))
       )
@@ -629,6 +632,7 @@ RULES
     );
 
     const thread = el("div", { id: "yta-thread", class: "yta-thread", "aria-live": "polite" });
+    state.boxes = Object.fromEntries(MODES.map(([id]) => [id, el("div", { class: "yta-msgs", "data-mode": id })]));
 
     // Shown while this video's thread is empty: what the tab does (and, on Chat, questions to start with).
     const intro = el("div", { class: "yta-intro", id: "yta-intro" },
@@ -660,6 +664,7 @@ RULES
     state.mode = mode;
     const panel = $("#yta-panel");
     panel.dataset.mode = mode;
+    $("#yta-thread").replaceChildren(box(mode)); // switch to this tab's own thread (others keep their state)
     document.querySelectorAll("#yta-panel .yta-tab").forEach((t) => {
       t.classList.toggle("yta-active", t.dataset.mode === mode);
       t.setAttribute("aria-selected", String(t.dataset.mode === mode));
@@ -731,25 +736,27 @@ RULES
   }
 
   async function ask(userContent, displayLabel, language, builtinReady, { cards = 0, quiz = 0, notes = false } = {}) {
+    // Bound to the tab it was asked from, even if the student switches tabs while it's answering.
+    const to = box(), messages = state.threads[state.mode];
     const configured = await chrome.runtime.sendMessage({ type: "isConfigured" });
     if (!configured?.ok) {
-      addMessage("assistant", "**No AI is set up.** Click ⚙ and choose Chrome built-in AI (free, no key) or add an API key.");
+      addMessage("assistant", "**No AI is set up.** Click ⚙ and choose Chrome built-in AI (free, no key) or add an API key.", { to });
       return;
     }
     state.busy = true;
     $("#yta-run").disabled = true;
-    addMessage("user", displayLabel);
-    const pending = addMessage("assistant", "", { pending: true });
+    addMessage("user", displayLabel, { to });
+    const pending = addMessage("assistant", "", { pending: true, to });
     try {
       const builtin = configured.provider === "builtin";
       const builtinOpts = builtin ? await builtinReady : null; // model ready before the slower caption fetch
       const ctx = await ensureContext();
       if ((cards || quiz) && !ctx.transcript) {
         pending.remove();
-        addMessage("assistant", `${cards ? "Flashcards" : "Quizzes"} need the video's captions, and none could be read for this video.`);
+        addMessage("assistant", `${cards ? "Flashcards" : "Quizzes"} need the video's captions, and none could be read for this video.`, { to });
         return;
       }
-      state.messages.push({ role: "user", content: userContent, label: displayLabel });
+      messages.push({ role: "user", content: userContent, label: displayLabel });
       const thread = $("#yta-thread");
       let frame = 0, latest = "";
       const onDelta = (text) => {
@@ -764,28 +771,28 @@ RULES
         });
       };
       const res = builtin
-        ? await builtinChat(ctx, language, state.messages, onDelta, builtinOpts).then(
+        ? await builtinChat(ctx, language, messages, onDelta, builtinOpts).then(
             (text) => ({ ok: true, text }),
             (e) => ({ ok: false, error: builtinError(e), partial: latest }))
-        : await sendChat(buildSystem(ctx, language), state.messages, onDelta);
+        : await sendChat(buildSystem(ctx, language), messages, onDelta);
       cancelAnimationFrame(frame);
       if (!res?.ok) {
-        state.messages.pop();
+        messages.pop();
         if (res?.partial && !cards && !quiz) fillAssistant(pending, res.partial);
         else pending.remove();
-        addMessage("assistant", builtin ? res.error : `**Error:** ${res?.error || "unknown"}\n\nCheck your key and model in ⚙ settings.`);
+        addMessage("assistant", builtin ? res.error : `**Error:** ${res?.error || "unknown"}\n\nCheck your key and model in ⚙ settings.`, { to });
         return;
       }
       if (cards || quiz) {
         const items = cards ? parseCards(res.text, cards, ctx.lengthSeconds) : parseQuiz(res.text, quiz, ctx.lengthSeconds);
         if (!items.length) {
-          state.messages.pop();
+          messages.pop();
           pending.remove();
-          addMessage("assistant", `Couldn't read ${cards ? "flashcards" : "a quiz"} from the AI's answer. Press Go to try again.`);
+          addMessage("assistant", `Couldn't read ${cards ? "flashcards" : "a quiz"} from the AI's answer. Press the button to try again.`, { to });
           return;
         }
         const content = cards ? cardsMarkdown(items) : quizMarkdown(items);
-        state.messages.push({ role: "assistant", content, ...(cards ? { cards: items } : { quiz: items }) });
+        messages.push({ role: "assistant", content, ...(cards ? { cards: items } : { quiz: items }) });
         fillAssistant(pending, content, cards ? { cards: items } : { quiz: items });
         saveHistory();
         if (cards) {
@@ -794,13 +801,13 @@ RULES
         } else setStatus("Quiz ready", "yta-ok");
         return;
       }
-      state.messages.push({ role: "assistant", content: res.text, ...(notes ? { notes: true } : {}) });
+      messages.push({ role: "assistant", content: res.text, ...(notes ? { notes: true } : {}) });
       fillAssistant(pending, res.text, { notes });
       saveHistory();
       setStatus(builtin ? "On-device AI" : configured.model, "yta-ok");
     } catch (e) {
       pending.remove();
-      addMessage("assistant", builtinError(e));
+      addMessage("assistant", builtinError(e), { to });
     } finally {
       state.busy = false;
       $("#yta-run").disabled = false;
@@ -1068,7 +1075,7 @@ RULES
     if (!alive() || state.busy) return;
     $("#yta-review-box")?.remove();
     const box = el("div", { class: "yta-msg yta-assistant yta-review", id: "yta-review-box" });
-    $("#yta-thread").append(box);
+    state.boxes[state.mode].append(box);
     const queue = dueCards(await loadDeck());
     const total = queue.length;
     let done = 0;
@@ -1122,25 +1129,45 @@ RULES
   // ponytail: one key per video, never evicted; add LRU pruning if chrome.storage.local (10 MB) fills up.
 
   const historyKey = (videoId) => `chat:${videoId}`;
+  const emptyThreads = () => ({ chat: [], notes: [], cards: [], quiz: [] });
 
   function saveHistory() {
-    chrome.storage.local.set({ [historyKey(state.videoId)]: state.messages });
+    chrome.storage.local.set({ [historyKey(state.videoId)]: state.threads });
+  }
+
+  // Older versions saved one combined list: sort each exchange into the tab it came from.
+  function splitThreads(list) {
+    const threads = emptyThreads();
+    let tab = "chat";
+    list.forEach((m, i) => {
+      if (m.role === "user") {
+        const a = list[i + 1];
+        tab = a?.cards ? "cards" : a?.quiz ? "quiz" : a?.notes ? "notes" : "chat";
+      }
+      threads[tab].push(m);
+    });
+    return threads;
   }
 
   async function restoreHistory(videoId) {
     if (!alive()) return;
     const saved = (await chrome.storage.local.get(historyKey(videoId)))[historyKey(videoId)];
-    if (!saved?.length || state?.videoId !== videoId || state.messages.length) return;
-    state.messages = saved;
-    for (const m of saved) addMessage(m.role, m.role === "user" ? m.label || m.content : m.content, { cards: m.cards, quiz: m.quiz, notes: m.notes });
+    if (!saved || state?.videoId !== videoId || Object.values(state.threads).some((t) => t.length)) return;
+    state.threads = { ...emptyThreads(), ...(Array.isArray(saved) ? splitThreads(saved) : saved) };
+    for (const [tab, list] of Object.entries(state.threads)) {
+      for (const m of list) {
+        addMessage(m.role, m.role === "user" ? m.label || m.content : m.content, { cards: m.cards, quiz: m.quiz, notes: m.notes, to: box(tab) });
+      }
+    }
   }
 
+  // Clears the open tab's thread only.
   function clearHistory() {
     if (!alive()) return;
     if (state.busy) return;
-    state.messages = [];
-    $("#yta-thread").innerHTML = "";
-    chrome.storage.local.remove(historyKey(state.videoId));
+    state.threads[state.mode] = [];
+    box().replaceChildren();
+    saveHistory();
   }
 
   // ---------- Mounting & navigation ----------
@@ -1166,7 +1193,7 @@ RULES
     if (state && state.videoId === videoId && existing && existing.isConnected) return;
 
     existing?.remove();
-    state = { videoId, mode: "chat", ctx: null, ctxPromise: null, messages: [], busy: false };
+    state = { videoId, mode: "chat", ctx: null, ctxPromise: null, threads: emptyThreads(), boxes: {}, busy: false };
 
     const tryMount = () => {
       const mp = findMountPoint();

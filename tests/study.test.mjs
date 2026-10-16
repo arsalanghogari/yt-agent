@@ -7,10 +7,11 @@ const code = [
   grab(/  const toSeconds = .*\n/),
   src.slice(src.indexOf("  // The JSON array in a model reply"), src.indexOf("  function parseCards(")),
   src.slice(src.indexOf("  // ---------- Quiz ----------"), src.indexOf("  function renderQuiz(")),
-  src.slice(src.indexOf("  const DECK_KEY ="), src.indexOf("  async function loadDeck()"))
-].join("\n") + "\nthis.api = { parseQuiz, quizMarkdown, mergeIntoDeck, schedule, dueCards, DAY };";
+  src.slice(src.indexOf("  const DECK_KEY ="), src.indexOf("  async function loadDeck()")),
+  grab(/  const emptyThreads = .*\n/), grab(/  function splitThreads\([\s\S]*?\n  }\n/)
+].join("\n") + "\nthis.api = { parseQuiz, quizMarkdown, mergeIntoDeck, schedule, dueCards, DAY, splitThreads };";
 const ctx = {}; vm.createContext(ctx); vm.runInContext(code, ctx);
-const { parseQuiz, quizMarkdown, mergeIntoDeck, schedule, dueCards, DAY } = ctx.api;
+const { parseQuiz, quizMarkdown, mergeIntoDeck, schedule, dueCards, DAY, splitThreads } = ctx.api;
 
 // --- quiz: answers given as index, letter or text; bad questions dropped; timestamps stripped; shuffled
 const reply = `Here's your quiz:
@@ -59,4 +60,14 @@ assert.ok(schedule({ ...again, ease: 1.3 }, "again", now).ease >= 1.3, "ease nev
 // --- due: only cards whose time has come, oldest first
 const due = dueCards([{ id: "a", due: now + 1 }, { id: "b", due: now - 5 }, { id: "c", due: now - 50 }], now);
 assert.deepEqual(due.map((x) => x.id), ["c", "b"]);
+// --- old saved chats (one combined list) are sorted into each tab's thread
+const old = [
+  { role: "user", content: "What is Cas9?" }, { role: "assistant", content: "An enzyme." },
+  { role: "user", content: "notes task" }, { role: "assistant", content: "## Notes", notes: true },
+  { role: "user", content: "cards task" }, { role: "assistant", content: "cards", cards: [{ front: "a", back: "b" }] },
+  { role: "user", content: "quiz task" }, { role: "assistant", content: "quiz", quiz: [{}] },
+  { role: "user", content: "follow-up on the quiz" }, { role: "assistant", content: "answer" }
+];
+const split = splitThreads(old);
+assert.deepEqual(Object.fromEntries(Object.entries(split).map(([k, v]) => [k, v.length])), { chat: 4, notes: 2, cards: 2, quiz: 2 });
 console.log("study checks passed");

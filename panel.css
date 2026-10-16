@@ -155,7 +155,7 @@ html[dark] #yta-panel .yta-primary, html[dark] #yta-panel .yta-send { --yta-acce
 
 /* ---------- Empty state ---------- */
 #yta-panel .yta-intro { margin-top: 18px; padding: 0 2px; }
-#yta-panel .yta-thread:not(:empty) ~ .yta-intro { display: none; }
+#yta-panel .yta-thread:has(.yta-msgs > *) ~ .yta-intro { display: none; }
 #yta-panel .yta-intro-title { margin: 0 0 4px; font-size: 16px; font-weight: 700; letter-spacing: -.01em; text-wrap: balance; }
 #yta-panel .yta-intro-text { margin: 0; color: var(--yta-ink-2); font-size: 13.5px; text-wrap: pretty; }
 #yta-panel .yta-chips { display: none; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 12px; }
@@ -168,8 +168,9 @@ html[dark] #yta-panel .yta-primary, html[dark] #yta-panel .yta-send { --yta-acce
 #yta-panel .yta-chip:hover { border-color: var(--yta-accent); background: var(--yta-accent-soft); }
 
 /* ---------- Thread ---------- */
-#yta-panel .yta-thread { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; max-height: 70vh; overflow-y: auto; }
-#yta-panel .yta-thread:empty { display: none; }
+#yta-panel .yta-thread { margin-top: 14px; max-height: 70vh; overflow-y: auto; }
+#yta-panel .yta-thread:not(:has(.yta-msgs > *)) { display: none; }
+#yta-panel .yta-msgs { display: flex; flex-direction: column; gap: 12px; }
 #yta-panel .yta-msg { animation: yta-in .28s var(--yta-ease) both; }
 #yta-panel .yta-user {
   align-self: flex-end; max-width: 85%; padding: 8px 13px; border-radius: 16px 16px 4px 16px;
@@ -215,7 +216,7 @@ html[dark] #yta-panel .yta-primary, html[dark] #yta-panel .yta-send { --yta-acce
 
 /* ---------- Chat box ---------- */
 #yta-panel .yta-followup { display: none; gap: 8px; margin-top: 12px; }
-#yta-panel .yta-thread:not(:empty) ~ .yta-followup, #yta-panel[data-mode="chat"] .yta-followup { display: flex; }
+#yta-panel .yta-thread:has(.yta-msgs > *) ~ .yta-followup, #yta-panel[data-mode="chat"] .yta-followup { display: flex; }
 #yta-panel .yta-followup input { flex: 1; height: 42px; padding: 0 16px; border-radius: 21px; font-size: 13.5px; }
 #yta-panel .yta-send {
   display: grid; place-items: center; flex: none; width: 42px; height: 42px; border: 0; border-radius: 50%;
@@ -326,7 +327,7 @@ html[dark] #yta-panel .yta-primary, html[dark] #yta-panel .yta-send { --yta-acce
 
 /* Beside the video (default layout), once there is a conversation: exactly as tall as the player,
    with the conversation scrolling inside. Before that the panel stays compact. */
-ytd-watch-flexy:not([theater]):not([fullscreen]) #secondary #yta-panel:not(.yta-collapsed):has(.yta-thread:not(:empty)) {
+ytd-watch-flexy:not([theater]):not([fullscreen]) #secondary #yta-panel:not(.yta-collapsed):has(.yta-msgs > *) {
   height: var(--yta-player-h, auto);
   display: flex; flex-direction: column;
 }
