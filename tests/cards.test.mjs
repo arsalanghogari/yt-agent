@@ -4,7 +4,7 @@ const grab = (re) => src.match(re)[0];
 const code = [
   grab(/  function fmtTime\([\s\S]*?\n  }\n/), grab(/  function parseTime\([\s\S]*?\n  }\n/),
   grab(/  const toSeconds = .*\n/),
-  src.slice(src.indexOf("  function parseCards("), src.indexOf("  const setTitle ="))
+  src.slice(src.indexOf("  // The JSON array in a model reply"), src.indexOf("  const setTitle ="))
 ].join("\n") + "\nthis.api = { parseCards, cardsMarkdown, cardsAsText };";
 const ctx = { state: { videoId: "abc123XYZ_0" } }; vm.createContext(ctx); vm.runInContext(code, ctx);
 const { parseCards, cardsMarkdown, cardsAsText } = ctx.api;

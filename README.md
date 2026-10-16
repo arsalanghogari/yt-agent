@@ -1,13 +1,12 @@
-# AI Agent for YouTube (Chrome extension)
+# Study Pal for YouTube (Chrome extension)
 
-An AI panel that sits right under the YouTube player and does three things with the video you have open:
+A study companion in a panel next to the YouTube player, for learning from the video you have open:
 
-1. **Summarize**: get the information without watching. TL;DR, key points with clickable timestamps, notable details, and who the video is for. Optionally tell it what you care about ("just the pricing part").
-2. **Explain**: understand the video in terms you already know. Type "explain it like I'm a rock climber" and every concept comes back as a climbing analogy, with a note on where the analogy breaks.
-3. **Ask an expert**: pick a lens ("a vocal coach analyzing live performances") and get the commentary that person would give, pointed at specific moments. Ask a question or let it free-comment.
-
-4. **Watch short** (prototype): plays only the video's best moments, back to back, in about 2, 5 or 10 minutes, cut at full sentences.
-5. **Flashcards** (prototype): turns the video into 10–30 study cards (term → definition or question → answer), each linking back to the moment it's explained. **Send to Quizlet** opens Quizlet's create-set page in your browser and fills it in for you to check and create (Quizlet has no public API, so this runs in your own logged-in browser; if Quizlet's page has changed, the cards are on your clipboard to paste into its Import box). **Download for Anki** saves a file Anki imports directly.
+1. **Chat**: ask anything about the video, like a tutor would answer it. Answers are grounded in the video, with clickable timestamps.
+2. **Notes**: study notes to review instead of rewatching: overview, key ideas, key terms, examples, and what to remember.
+3. **Flashcards**: 10–30 cards (term → definition or question → answer), each linking back to the moment it's explained. They're added to your daily review automatically. **Send to Quizlet** fills in a new Quizlet set in your browser for you to check and create (Quizlet has no public API; if its page has changed, the cards are on your clipboard to paste into its Import box). **Download for Anki** saves a file Anki imports directly.
+4. **Quiz**: a multiple-choice quiz on what the video teaches. Wrong answers show why, with a link to rewatch the part that covers it.
+5. **Daily review**: flashcards from every video you've studied, shown when they're due (spaced repetition: Again / Good / Easy). The **Review** button shows how many are due.
 
 Answers stream in as they are written. Every timestamp in an answer is clickable and seeks the player. Follow-up questions keep the thread going, and each video's chat is saved so it is still there when you come back (🗑 clears it).
 
@@ -59,7 +58,7 @@ Copyright 2026 Arsalan Ghogari. Source available under the [PolyForm Strict Lice
 sh tests/run.sh
 ```
 
-Runs the checks in `tests/` with Node (no dependencies): streaming for every provider, the built-in AI path, short-version cutting, and flashcard export.
+Runs the checks in `tests/` with Node (no dependencies): streaming for every provider, the built-in AI path, flashcard export, quizzes, and the review scheduler.
 
 ## Files
 

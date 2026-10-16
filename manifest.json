@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "AI Agent for YouTube",
-  "version": "1.4.0",
-  "description": "Summarize any YouTube video, explain it with analogies you pick, or get expert commentary. Free on-device AI, no setup.",
+  "name": "Study Pal for YouTube",
+  "version": "2.0.0",
+  "description": "Study any YouTube video: ask questions, get study notes, quizzes and flashcards, and review them daily. Free on-device AI.",
   "permissions": ["storage"],
   "host_permissions": ["https://www.youtube.com/*"],
   "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
@@ -24,7 +24,7 @@
   ],
   "options_page": "options.html",
   "action": {
-    "default_title": "AI Agent for YouTube settings",
+    "default_title": "Study Pal for YouTube settings",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

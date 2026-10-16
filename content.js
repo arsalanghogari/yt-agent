@@ -160,11 +160,7 @@
         for (const ev of j.events || []) {
           if (!ev.segs) continue;
           const text = ev.segs.map((s) => s.utf8).join("").replace(/\s+/g, " ").trim();
-          if (!text) continue;
-          const t = (ev.tStartMs || 0) / 1000;
-          // Auto-captions carry a time per word; kept for cutting at exact words (buildTimeline).
-          const words = ev.segs.filter((s) => s.utf8.trim()).map((s) => ({ t: t + (s.tOffsetMs || 0) / 1000, text: s.utf8 }));
-          segs.push({ t, end: t + (ev.dDurationMs || 0) / 1000, text, words });
+          if (text) segs.push({ t: (ev.tStartMs || 0) / 1000, text });
         }
         if (segs.length) return segs;
       }
@@ -183,44 +179,6 @@
       if (segs.length) return segs;
     } catch {}
     return null;
-  }
-
-  // Word and sentence timings, for cutting the short version at full sentences. Auto-captions carry a time
-  // per word; uploaded captions only per line, so word times inside a line are interpolated by character
-  // position. Uploaded captions are punctuated, so sentences end at . ? ! — auto-captions usually aren't,
-  // so there pauses split the text into chunks (and the model's quoted first/last words do the real work,
-  // see findPhrase).
-  function buildTimeline(segs) {
-    const words = [];
-    for (const s of segs) {
-      const end = Math.max(s.end ?? s.t + 3, s.t + 0.1);
-      if (s.words?.length > 1) {
-        s.words.forEach((w, i) => words.push({ t: w.t, end: Math.min(s.words[i + 1]?.t ?? end, w.t + 0.8), text: w.text.trim() }));
-        continue;
-      }
-      for (const m of s.text.matchAll(/\S+/g)) {
-        words.push({ t: s.t + (end - s.t) * m.index / s.text.length, end: s.t + (end - s.t) * (m.index + m[0].length) / s.text.length, text: m[0] });
-      }
-    }
-    words.sort((a, b) => a.t - b.t);
-    const endsSentence = (w) => /[.?!…]["'”’)\]]*$/.test(w.text);
-    const punctuated = words.filter(endsSentence).length >= words.length / 40;
-    const sentences = [];
-    let cur = null;
-    words.forEach((w, i) => {
-      cur ||= { start: w.t, end: w.end, text: [] };
-      cur.text.push(w.text);
-      cur.end = Math.max(cur.end, w.end);
-      const next = words[i + 1];
-      const gap = next ? next.t - w.t : Infinity;
-      const len = cur.end - cur.start;
-      const ends = !next || (punctuated ? endsSentence(w) || len > 60 : gap > 1 || (len > 20 && gap > 0.5) || len > 40);
-      if (!ends) return;
-      if (next) cur.end = Math.min(cur.end, next.t);
-      sentences.push({ start: cur.start, end: cur.end, text: cur.text.join(" ") });
-      cur = null;
-    });
-    return { words, sentences, punctuated };
   }
 
   function segmentsToText(segs) {
@@ -279,8 +237,7 @@
     if (segs) transcript = segmentsToText(segs);
     const transcriptLangCode = baseLang(track?.languageCode) || null;
     const fromDub = !!(segs && data.originalLang && transcriptLangCode && transcriptLangCode !== data.originalLang);
-    const timeline = segs ? buildTimeline(segs) : { words: [], sentences: [], punctuated: false }; // for short-version cuts
-    return { ...data, transcript, ...timeline, transcriptLang, transcriptLangCode, transcriptError, autoCaptions, fromDub };
+    return { ...data, transcript, transcriptLang, transcriptLangCode, transcriptError, autoCaptions, fromDub };
   }
 
   // ---------- Prompting ----------
@@ -301,7 +258,7 @@
       ? `TRANSCRIPT (${ctx.autoCaptions ? "auto-generated captions: expect misheard words, especially names, products and jargon" : "captions"}; each line starts with its timestamp)${ctx.fromDub ? `\nNote: this video was made in "${ctx.originalLang}", but the only captions available are of a dubbed "${ctx.transcriptLangCode}" audio track. Treat it as a translation of what was said.` : ""}:\n${ctx.transcript}`
       : `No transcript could be read (${ctx.transcriptError || "unknown reason"}). Work only from the title and description, and say clearly that you could not access the spoken content.`;
 
-    return `You are an AI agent embedded in a YouTube page, helping the viewer with the video that is currently open.
+    return `You are Study Pal, a tutor embedded in a YouTube page, helping a student learn from the video that is currently open.
 
 VIDEO
 ${meta}
@@ -311,7 +268,8 @@ ${description}
 ${content}
 
 RULES
-- Ground everything in the video content. If something is not covered in the video, say so instead of guessing.
+- Ground your answers in the video. If a question goes beyond it, you may answer from general knowledge, but say clearly which parts are not from the video.
+- Teach, don't just answer: explain clearly at the student's level, define jargon when you first use it, and use a short example when it helps.
 - When a caption word looks misheard, use the title, tags, description, and your own knowledge to work out what was actually said, and write the corrected term. If you are not sure of the correction, keep the caption wording and note the likely intended term in parentheses.
 - Whenever you reference a specific moment, cite its timestamp in square brackets like [4:32] or [1:02:15]. The viewer can click these to jump there, so use them generously and place them right after the claim they support.
 - Answer in ${cfgLang || "English"}.
@@ -320,55 +278,34 @@ RULES
   }
 
   function buildTask(mode, fields) {
-    if (mode === "summarize") {
+    if (mode === "notes") {
       return [
-        "Summarize this video so I do not have to watch it.",
-        "Structure: a 2-3 sentence TL;DR, then the key points in order (each with a timestamp), then any notable details, numbers, names, or recommendations. End with one line on who this video is actually useful for.",
-        fields.focus ? `Pay special attention to: ${fields.focus}` : null
-      ].filter(Boolean).join("\n");
-    }
-    if (mode === "explain") {
-      const framing = fields.framing || "a curious beginner with no background in this topic";
-      return [
-        "Explain what this video teaches so I truly understand it, not just what it says.",
-        `Here is how I want it framed: ${framing}.`,
-        "Build the explanation around analogies from that world. For each core idea: state it plainly, give the analogy, then say exactly where the analogy maps and where it breaks. Avoid jargon unless you define it right away. Include timestamps for where each idea appears in the video.",
-        "Finish with a section called 'The gist' that is one or two sentences I could repeat to a friend."
+        "Write study notes for this video that I can review instead of rewatching it.",
+        "Use these sections: ## Overview (2-3 sentences on what the video teaches). ## Key ideas (the main ideas in the order they come, each as a bullet that explains the idea in a full sentence or two, with its timestamp). ## Key terms (each term in bold, then its definition as the video gives it). ## Examples (the examples, cases or numbers the video uses, with timestamps). ## Remember (the 3 to 5 most important takeaways).",
+        "Be accurate and complete, but don't pad: leave out a section if the video has nothing for it."
       ].join("\n");
     }
-    if (mode === "cards") {
-      const style = fields.cardStyle === "qa"
-        ? "a question on the front and its answer on the back"
-        : "a key term or concept on the front and its definition or explanation on the back";
+    if (mode === "quiz") {
       return [
-        `Make up to ${fields.cardCount} flashcards for studying what this video teaches, with ${style}.`,
-        "Cover the most important, testable ideas across the whole video, not just the start. Fewer, better cards beat padding: never make two cards that test the same fact.",
-        "Front: a clear, grammatical question or term with exactly one right answer, specific enough that it can't be answered with a generic statement.",
-        "Back: the actual answer as the video explains it, in 1 to 3 sentences (up to about 50 words). Include the specifics the video gives, such as how or why it works, numbers, names, examples and comparisons, so the card teaches something rather than restating the question. Use only what the video says.",
-        "Each card must make sense without the video. No trivia about the presenter, the channel or sponsors. Do not put timestamps or links in the card text.",
-        "For each card give, separately, the timestamp where that idea is explained.",
-        'Reply with only a JSON array and no other text, like: [{"front":"Spaced repetition","back":"Reviewing material at increasing intervals so it moves into long-term memory.","time":"4:32"}]'
+        `Write a multiple-choice quiz of ${fields.quizCount} questions that checks whether I understood this video.`,
+        "Test understanding of the most important ideas across the whole video, not trivia: ask why and how, apply ideas to a new case, compare concepts. Mix easier and harder questions.",
+        "Each question has 4 answer choices: one clearly correct, three plausible but wrong (common misconceptions, not obviously silly). Each question must make sense without the video.",
+        "For each question give a 1-2 sentence explanation of why the right answer is right, and the timestamp where the video covers it. Do not put timestamps in the question, choices or explanation text.",
+        'Reply with only a JSON array and no other text, like: [{"question":"Why does spacing reviews out help memory?","choices":["It forces effortful recall","It reduces study time","It avoids boredom","It improves reading speed"],"answer":0,"explanation":"Recalling after a gap takes effort, which strengthens the memory.","time":"4:32"}] where answer is the index of the correct choice.'
       ].join("\n");
     }
-    if (mode === "cut") {
-      return [
-        `Make a short version of this video, about ${fields.cutMinutes} minutes long, made of its best moments.`,
-        "First read the whole transcript. Then identify the video's key points: the 5 to 10 most valuable ideas, findings, claims or pieces of advice in the entire video. The best points are often in the middle or near the end, not at the start.",
-        "Rank them from most to least valuable for someone who will not watch the video.",
-        "For each key point give the span where the speaker actually makes it: 10 to 45 seconds, beginning where that thought begins and ending where it ends, never mid-sentence. The transcript may have no punctuation, so judge where each thought starts and stops from the words.",
-        "For each span also copy, exactly as written in the transcript, its first 5 to 8 words and its last 5 to 8 words. These are used to cut precisely.",
-        "Skip intros, sponsor segments, calls to subscribe, recaps and filler.",
-        'Reply with only a JSON array ordered by rank, best first, and no other text, like: [{"rank":1,"start":"4:05","end":"4:40","first_words":"but then came my senior thesis","last_words":"spend a year on it","title":"3 to 6 word label"}]'
-      ].join("\n");
-    }
-    // ask
-    const persona = fields.persona || "a knowledgeable expert in whatever this video is about";
-    const q = fields.question?.trim();
+    // cards
+    const style = fields.cardStyle === "qa"
+      ? "a question on the front and its answer on the back"
+      : "a key term or concept on the front and its definition or explanation on the back";
     return [
-      `Take on the perspective of ${persona}. Analyze this video the way that person would, noticing things a casual viewer would miss.`,
-      q
-        ? `My question: ${q}`
-        : "I have no specific question: give me the commentary this expert would offer, pointing to specific moments with timestamps, including what is done well, what is weak or risky, and what to listen or look for on a rewatch."
+      `Make up to ${fields.cardCount} flashcards for studying what this video teaches, with ${style}.`,
+      "Cover the most important, testable ideas across the whole video, not just the start. Fewer, better cards beat padding: never make two cards that test the same fact.",
+      "Front: a clear, grammatical question or term with exactly one right answer, specific enough that it can't be answered with a generic statement.",
+      "Back: the actual answer as the video explains it, in 1 to 3 sentences (up to about 50 words). Include the specifics the video gives, such as how or why it works, numbers, names, examples and comparisons, so the card teaches something rather than restating the question. Use only what the video says.",
+      "Each card must make sense without the video. No trivia about the presenter, the channel or sponsors. Do not put timestamps or links in the card text.",
+      "For each card give, separately, the timestamp where that idea is explained.",
+      'Reply with only a JSON array and no other text, like: [{"front":"Spaced repetition","back":"Reviewing material at increasing intervals so it moves into long-term memory.","time":"4:32"}]'
     ].join("\n");
   }
 
@@ -555,14 +492,14 @@ RULES
     return wrap;
   }
 
-  function addMessage(role, content, { pending = false, cut = null, cards = null } = {}) {
+  function addMessage(role, content, { pending = false, cards = null, quiz = null } = {}) {
     const thread = $("#yta-thread");
     const msg = el("div", { class: `yta-msg yta-${role}` });
     if (pending) {
       msg.classList.add("yta-pending");
       msg.append(el("span", { class: "yta-dots" }, el("i"), el("i"), el("i")));
     } else if (role === "assistant") {
-      fillAssistant(msg, content, { cut, cards });
+      fillAssistant(msg, content, { cards, quiz });
     } else {
       msg.append(el("p", { text: content }));
     }
@@ -571,16 +508,10 @@ RULES
     return msg;
   }
 
-  function fillAssistant(msg, content, { streaming = false, cut = null, cards = null } = {}) {
+  function fillAssistant(msg, content, { streaming = false, cards = null, quiz = null } = {}) {
     msg.classList.remove("yta-pending");
-    msg.replaceChildren(renderMarkdown(content));
+    msg.replaceChildren(quiz ? renderQuiz(quiz) : renderMarkdown(content));
     if (streaming) return;
-    if (cut) {
-      const btn = el("button", { class: "yta-primary yta-cut-btn", text: "▶ Play short version",
-        onclick: () => (activeCut?.segs === cut ? stopCut("Stopped the short version.") : playCut(cut)) });
-      btn.ytaCut = cut;
-      msg.append(btn);
-    }
     if (cards) {
       msg.append(el("div", { class: "yta-card-actions" },
         el("button", { class: "yta-primary", text: "Send to Quizlet", title: "Opens Quizlet and fills in a new set for you to check and create", onclick: () => sendToQuizlet(cards) }),
@@ -610,13 +541,22 @@ RULES
 
   // ---------- Panel ----------
 
+  const MODES = [
+    ["chat", "Chat", "Ask anything about the video below."],
+    ["notes", "Notes", "Study notes you can review instead of rewatching."],
+    ["cards", "Flashcards", "Added to your daily review; send them to Quizlet or Anki too."],
+    ["quiz", "Quiz", "Check what you understood; wrong answers link to the part to rewatch."]
+  ];
+
   function buildPanel() {
     const panel = el("div", { id: PANEL_ID });
 
     const header = el("div", { class: "yta-header" },
-      el("div", { class: "yta-brand" }, el("span", { class: "yta-logo", text: "▶" }), el("span", { text: "AI Agent" })),
+      el("div", { class: "yta-brand" }, el("span", { class: "yta-logo", text: "▶" }), el("span", { text: "Study Pal" })),
       el("span", { id: "yta-status", class: "yta-status" }),
       el("div", { class: "yta-header-actions" },
+        el("button", { class: "yta-review-btn", id: "yta-review", title: "Review the flashcards that are due today", onclick: startReview },
+          "Review", el("span", { class: "yta-badge", id: "yta-due" })),
         el("button", { class: "yta-icon", title: "Clear this video's chat", text: "🗑", onclick: clearHistory }),
         el("button", { class: "yta-icon", title: "Settings", text: "⚙", onclick: () => alive() && chrome.runtime.sendMessage({ type: "openOptions" }) }),
         el("button", { class: "yta-icon", id: "yta-toggle", title: "Expand / collapse", text: "▾", onclick: () => panel.classList.toggle("yta-collapsed") })
@@ -628,38 +568,13 @@ RULES
     });
 
     const tabs = el("div", { class: "yta-tabs", role: "tablist" });
-    const modes = [
-      ["summarize", "Summarize", "Skip the video, get the info"],
-      ["explain", "Explain", "Understand it with your analogies"],
-      ["ask", "Ask an expert", "Commentary through a lens you pick"],
-      ["cut", "Watch short", "Play only the key moments"],
-      ["cards", "Flashcards", "Study it in Quizlet or Anki"]
-    ];
-    for (const [id, label, sub] of modes) {
+    for (const [id, label] of MODES) {
       tabs.append(el("button", { class: "yta-tab", "data-mode": id, onclick: () => setMode(id) },
-        el("span", { class: "yta-tab-label", text: label }),
-        el("span", { class: "yta-tab-sub", text: sub })));
+        el("span", { class: "yta-tab-label", text: label })));
     }
 
     const form = el("div", { class: "yta-form" });
     form.append(
-      // summarize
-      el("div", { class: "yta-fields", "data-mode": "summarize" },
-        el("input", { id: "yta-focus", placeholder: "Optional: anything specific you want out of it? (e.g. just the pricing part)" })),
-      // explain
-      el("div", { class: "yta-fields", "data-mode": "explain" },
-        el("input", { id: "yta-framing", placeholder: "Explain it like... (e.g. I'm a rock climber, use climbing analogies)" })),
-      // ask
-      el("div", { class: "yta-fields", "data-mode": "ask" },
-        el("input", { id: "yta-persona", placeholder: "Expert lens (e.g. a vocal coach analyzing live performances)" }),
-        el("input", { id: "yta-question", placeholder: "Optional question (e.g. how is she handling the belt in the chorus?)" })),
-      // cut
-      el("div", { class: "yta-fields", "data-mode": "cut" },
-        el("select", { id: "yta-cut-len", "aria-label": "Length of the short version" },
-          el("option", { value: "2", text: "About 2 minutes" }),
-          el("option", { value: "5", text: "About 5 minutes", selected: "" }),
-          el("option", { value: "10", text: "About 10 minutes" }))),
-      // cards
       el("div", { class: "yta-fields yta-row", "data-mode": "cards" },
         el("select", { id: "yta-card-count", "aria-label": "Number of flashcards" },
           el("option", { value: "10", text: "10 cards" }),
@@ -668,41 +583,38 @@ RULES
         el("select", { id: "yta-card-style", "aria-label": "Flashcard style" },
           el("option", { value: "terms", text: "Term → definition" }),
           el("option", { value: "qa", text: "Question → answer" }))),
+      el("div", { class: "yta-fields", "data-mode": "quiz" },
+        el("select", { id: "yta-quiz-count", "aria-label": "Number of questions" },
+          el("option", { value: "5", text: "5 questions" }),
+          el("option", { value: "10", text: "10 questions" }))),
       el("div", { class: "yta-actions" },
         el("button", { id: "yta-run", class: "yta-primary", text: "Go", onclick: runMode }),
         el("span", { class: "yta-hint", id: "yta-hint" })),
       el("p", { class: "yta-notice", id: "yta-notice" })
     );
 
-    form.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && e.target.tagName === "INPUT") { e.preventDefault(); runMode(); }
-    });
-
     const thread = el("div", { id: "yta-thread", class: "yta-thread" });
 
-    const followup = el("div", { class: "yta-followup" },
-      el("input", { id: "yta-followup-input", placeholder: "Follow up..." }),
+    // The chat box: the main input on the Chat tab, and for follow-ups everywhere else.
+    const chatBox = el("div", { class: "yta-followup" },
+      el("input", { id: "yta-followup-input", placeholder: "Ask anything about this video..." }),
       el("button", { class: "yta-primary", text: "Send", onclick: sendFollowup })
     );
-    followup.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); sendFollowup(); } });
+    chatBox.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); sendFollowup(); } });
 
-    const body = el("div", { class: "yta-body" }, tabs, form, thread, followup);
+    const body = el("div", { class: "yta-body" }, tabs, form, thread, chatBox);
     panel.append(header, body);
     return panel;
   }
 
   function setMode(mode) {
     state.mode = mode;
+    const panel = $("#yta-panel");
+    panel.dataset.mode = mode;
     document.querySelectorAll("#yta-panel .yta-tab").forEach((t) => t.classList.toggle("yta-active", t.dataset.mode === mode));
     document.querySelectorAll("#yta-panel .yta-fields").forEach((f) => f.classList.toggle("yta-show", f.dataset.mode === mode));
-    const hint = $("#yta-hint");
-    hint.textContent = mode === "summarize" ? "Get the info without watching."
-      : mode === "explain" ? "Blank = your default framing from settings."
-      : mode === "cut" ? "Plays just the key moments, back to back."
-      : mode === "cards" ? "Then send them to Quizlet or Anki."
-      : "Blank = your default lens from settings.";
-    const input = $(`#yta-panel .yta-fields[data-mode="${mode}"] input`);
-    if (input && !$("#yta-panel").classList.contains("yta-collapsed")) input.focus();
+    $("#yta-hint").textContent = MODES.find(([id]) => id === mode)[2];
+    if (mode === "chat" && !panel.classList.contains("yta-collapsed")) $("#yta-followup-input").focus();
   }
 
   async function ensureContext() {
@@ -715,12 +627,12 @@ RULES
         state.ctx = ctx;
         setStatus(`Transcript loaded${ctx.transcriptLang ? " (" + ctx.transcriptLang + ")" : ""}`, "yta-ok");
         if (notice) notice.textContent = ctx.fromDub
-          ? `This video has no captions in its original language, so the agent is reading the ${ctx.transcriptLang} captions of a dubbed version.`
+          ? `This video has no captions in its original language, so Study Pal is reading the ${ctx.transcriptLang} captions of a dubbed version.`
           : "";
       } else {
         state.ctxPromise = null; // retry on the next request (e.g. an ad was playing)
         setStatus("No transcript", "yta-warn");
-        if (notice) notice.textContent = `Couldn't read the captions: ${ctx.transcriptError}. Answers will use only the title and description. Press Go to try again.`;
+        if (notice) notice.textContent = `Couldn't read the captions: ${ctx.transcriptError}. Answers will use only the title and description. Try again in a moment.`;
       }
       return ctx;
     }).catch((e) => {
@@ -733,28 +645,21 @@ RULES
 
   async function runMode() {
     if (!alive()) return;
-    if (state.busy) return;
+    if (state.busy || state.mode === "chat") return;
     const builtinReady = prefs.provider === "builtin" ? startBuiltin(prefs.language) : null;
     builtinReady?.catch(() => {}); // awaited (and reported) in ask()
     const mode = state.mode;
-    const cfg = await chrome.storage.local.get(["analogyDomain", "persona", "language"]);
+    const cfg = await chrome.storage.local.get(["language"]);
     const fields = {
-      focus: $("#yta-focus").value.trim(),
-      framing: $("#yta-framing").value.trim() || cfg.analogyDomain || "",
-      persona: $("#yta-persona").value.trim() || cfg.persona || "",
-      question: $("#yta-question").value.trim(),
-      cutMinutes: Number($("#yta-cut-len").value) || 5,
       cardCount: Number($("#yta-card-count").value) || 20,
-      cardStyle: $("#yta-card-style").value
+      cardStyle: $("#yta-card-style").value,
+      quizCount: Number($("#yta-quiz-count").value) || 5
     };
-    const task = buildTask(mode, fields);
-    const label = mode === "summarize" ? "Summarize" + (fields.focus ? `: ${fields.focus}` : "")
-      : mode === "explain" ? fields.framing ? `Explain: ${fields.framing}` : "Explain simply"
-      : mode === "cut" ? `Watch short: about ${fields.cutMinutes} minutes`
-      : mode === "cards" ? `Flashcards: ${fields.cardCount} ${fields.cardStyle === "qa" ? "questions" : "terms"}`
-      : `Ask an expert: ${[fields.persona && `As ${fields.persona.replace(/^as\s+/i, "")}`, fields.question].filter(Boolean).join(", ") || "general commentary"}`;
-    await ask(task, label, cfg.language, builtinReady,
-      { cut: mode === "cut" ? fields.cutMinutes : 0, cards: mode === "cards" ? fields.cardCount : 0 });
+    const label = mode === "notes" ? "Study notes"
+      : mode === "quiz" ? `Quiz: ${fields.quizCount} questions`
+      : `Flashcards: ${fields.cardCount} ${fields.cardStyle === "qa" ? "questions" : "terms"}`;
+    await ask(buildTask(mode, fields), label, cfg.language, builtinReady,
+      { cards: mode === "cards" ? fields.cardCount : 0, quiz: mode === "quiz" ? fields.quizCount : 0 });
   }
 
   async function sendFollowup() {
@@ -769,7 +674,7 @@ RULES
     await ask(q, q, cfg.language, builtinReady);
   }
 
-  async function ask(userContent, displayLabel, language, builtinReady, { cut = 0, cards = 0 } = {}) {
+  async function ask(userContent, displayLabel, language, builtinReady, { cards = 0, quiz = 0 } = {}) {
     const configured = await chrome.runtime.sendMessage({ type: "isConfigured" });
     if (!configured?.ok) {
       addMessage("assistant", "**No AI is set up.** Click ⚙ and choose Chrome built-in AI (free, no key) or add an API key.");
@@ -783,9 +688,9 @@ RULES
       const builtin = configured.provider === "builtin";
       const builtinOpts = builtin ? await builtinReady : null; // model ready before the slower caption fetch
       const ctx = await ensureContext();
-      if ((cut || cards) && !ctx.transcript) {
+      if ((cards || quiz) && !ctx.transcript) {
         pending.remove();
-        addMessage("assistant", `${cut ? "The short version" : "Flashcards"} need the video's captions, and none could be read for this video.`);
+        addMessage("assistant", `${cards ? "Flashcards" : "Quizzes"} need the video's captions, and none could be read for this video.`);
         return;
       }
       state.messages.push({ role: "user", content: userContent, label: displayLabel });
@@ -793,7 +698,7 @@ RULES
       let frame = 0, latest = "";
       const onDelta = (text) => {
         latest = text;
-        if (cut || cards) return; // the reply is JSON; keep the dots until it's turned into segments or cards
+        if (cards || quiz) return; // the reply is JSON; keep the dots until it's turned into cards or a quiz
         // Re-render at most once per frame; only follow the bottom if the reader is already there.
         frame ||= requestAnimationFrame(() => {
           frame = 0;
@@ -802,50 +707,41 @@ RULES
           if (atBottom) thread.scrollTop = thread.scrollHeight;
         });
       };
-      const modelCtx = cut ? withSentenceTranscript(ctx) : ctx;
       const res = builtin
-        ? await builtinChat(modelCtx, language, state.messages, onDelta, builtinOpts).then(
+        ? await builtinChat(ctx, language, state.messages, onDelta, builtinOpts).then(
             (text) => ({ ok: true, text }),
             (e) => ({ ok: false, error: builtinError(e), partial: latest }))
-        : await sendChat(buildSystem(modelCtx, language), state.messages, onDelta);
+        : await sendChat(buildSystem(ctx, language), state.messages, onDelta);
       cancelAnimationFrame(frame);
       if (!res?.ok) {
         state.messages.pop();
-        if (res?.partial) fillAssistant(pending, res.partial);
+        if (res?.partial && !cards && !quiz) fillAssistant(pending, res.partial);
         else pending.remove();
         addMessage("assistant", builtin ? res.error : `**Error:** ${res?.error || "unknown"}\n\nCheck your key and model in ⚙ settings.`);
-      } else if (cards) {
-        const set = parseCards(res.text, cards, ctx.lengthSeconds);
-        if (!set.length) {
-          state.messages.pop();
-          pending.remove();
-          addMessage("assistant", "Couldn't read flashcards from the AI's answer. Press Go to try again.");
-        } else {
-          const content = cardsMarkdown(set);
-          state.messages.push({ role: "assistant", content, cards: set });
-          fillAssistant(pending, content, { cards: set });
-          saveHistory();
-          setStatus(`${set.length} flashcards ready`, "yta-ok");
-        }
-      } else if (cut) {
-        const segs = parseCut(res.text, ctx, cut * 60);
-        if (!segs.length) {
-          state.messages.pop();
-          pending.remove();
-          addMessage("assistant", "Couldn't pick the key moments from the AI's answer. Press Go to try again.");
-        } else {
-          const content = cutMarkdown(segs, ctx.lengthSeconds);
-          state.messages.push({ role: "assistant", content, cut: segs });
-          fillAssistant(pending, content, { cut: segs });
-          saveHistory();
-          setStatus("Short version ready", "yta-ok");
-        }
-      } else {
-        state.messages.push({ role: "assistant", content: res.text });
-        fillAssistant(pending, res.text);
-        saveHistory();
-        setStatus(builtin ? "Chrome built-in AI · on-device" : `${configured.provider} · ${configured.model}`, "yta-ok");
+        return;
       }
+      if (cards || quiz) {
+        const items = cards ? parseCards(res.text, cards, ctx.lengthSeconds) : parseQuiz(res.text, quiz, ctx.lengthSeconds);
+        if (!items.length) {
+          state.messages.pop();
+          pending.remove();
+          addMessage("assistant", `Couldn't read ${cards ? "flashcards" : "a quiz"} from the AI's answer. Press Go to try again.`);
+          return;
+        }
+        const content = cards ? cardsMarkdown(items) : quizMarkdown(items);
+        state.messages.push({ role: "assistant", content, ...(cards ? { cards: items } : { quiz: items }) });
+        fillAssistant(pending, content, cards ? { cards: items } : { quiz: items });
+        saveHistory();
+        if (cards) {
+          const added = await addToDeck(items);
+          setStatus(`${items.length} flashcards ready${added ? ` · ${added} added to your daily review` : ""}`, "yta-ok");
+        } else setStatus("Quiz ready", "yta-ok");
+        return;
+      }
+      state.messages.push({ role: "assistant", content: res.text });
+      fillAssistant(pending, res.text);
+      saveHistory();
+      setStatus(builtin ? "Chrome built-in AI · on-device" : `${configured.provider} · ${configured.model}`, "yta-ok");
     } catch (e) {
       pending.remove();
       addMessage("assistant", builtinError(e));
@@ -855,191 +751,31 @@ RULES
     }
   }
 
-  // ---------- Short version: play only the key moments ----------
-
   const toSeconds = (v) => (typeof v === "number" ? v : parseTime(String(v ?? "").replace(/[^\d:]/g, "") || "NaN"));
-
-  // "1 min 05 s" rather than "1:05", so durations aren't turned into clickable timestamps.
-  const fmtDuration = (sec) => {
-    sec = Math.round(sec);
-    return sec < 60 ? `${sec} s` : `${Math.floor(sec / 60)} min ${String(sec % 60).padStart(2, "0")} s`;
-  };
-
-  const normWord = (w) => String(w).toLowerCase().replace(/[^\p{L}\p{N}']/gu, "");
-
-  // Where a quoted run of words occurs in the timeline near time `near` (within 45 s): its first word's
-  // start, or (atEnd) its last word's end. Needs 3+ words in order (or all of a shorter quote).
-  function findPhrase(words, phrase, near, atEnd) {
-    const want = String(phrase || "").split(/\s+/).map(normWord).filter(Boolean);
-    if (want.length < 2 || !Number.isFinite(near)) return null;
-    let best = null;
-    for (let i = 0; i < words.length; i++) {
-      if (Math.abs(words[i].t - near) > 45) continue;
-      let k = 0, j = i;
-      while (k < want.length && j < words.length) {
-        const w = normWord(words[j].text);
-        if (w && w !== want[k]) break;
-        if (w) k++;
-        j++;
-      }
-      if (k < Math.min(3, want.length)) continue;
-      const score = k * 100 - Math.abs(words[i].t - near);
-      if (!best || score > best.score) best = { score, t: words[i].t, end: words[j - 1].end };
-    }
-    return best ? (atEnd ? best.end : best.t) : null;
-  }
-
-  // Turn the model's JSON (key points ranked best first) into playable segments: snap each to full
-  // sentences, drop anything invalid or tiny, merge overlaps, then fit the requested length. Models are bad
-  // at adding up durations, so the length is enforced here: long points are cut back to their last full
-  // sentence that fits, and points are kept in rank order until the budget is used, then played in order.
-  function parseCut(text, ctx, targetSeconds = Infinity) {
-    let raw;
-    try { raw = JSON.parse(text.match(/\[[\s\S]*\]/)?.[0]); } catch { return []; }
-    if (!Array.isArray(raw)) return [];
-    const sents = ctx.sentences || [];
-    const words = ctx.words || [];
-    const dur = ctx.lengthSeconds || Infinity;
-    // The last sentence starting at or before t. The transcript shows times rounded down to the second
-    // (a sentence starting at 19.6 s is listed as 0:19), so model-given times get up to a second of slack.
-    const sentenceAt = (t, slack = 0) => {
-      let found = null;
-      for (const s of sents) { if (s.start <= t + slack) found = s; else break; }
-      return found || sents[0];
-    };
-    // Exact times from the quoted words when they can be found near the model's time; then, on punctuated
-    // captions, widen to the full sentence. Without punctuation the quote itself marks the thought.
-    const cutStart = (t, quote) => {
-      const exact = findPhrase(words, quote, t, false);
-      if (exact == null) return sents.length ? sentenceAt(t, 1).start : t;
-      return ctx.punctuated ? sentenceAt(exact).start : exact;
-    };
-    const cutEnd = (t, quote) => {
-      const exact = findPhrase(words, quote, t, true);
-      if (exact == null) return Math.min(sents.length ? sentenceAt(t, 1).end : t, dur);
-      return Math.min(ctx.punctuated ? sentenceAt(exact - 0.2).end : exact, dur);
-    };
-    const segs = raw
-      .map((r, i) => ({ start: toSeconds(r?.start), end: toSeconds(r?.end), title: String(r?.title || "").trim().slice(0, 60),
-        rank: Number(r?.rank) || i + 1, first: r?.first_words, last: r?.last_words }))
-      // judge length on the model's own times: snapping can stretch a 1-second blip to a whole sentence
-      .filter((s) => Number.isFinite(s.start) && Number.isFinite(s.end) && s.start >= 0 && s.start < dur && s.end - s.start >= 3)
-      .map(({ first, last, ...s }) => ({ ...s, start: cutStart(s.start, first), end: cutEnd(s.end, last) }))
-      .filter((s) => s.end - s.start >= 3)
-      .sort((a, b) => a.start - b.start);
-    const merged = [];
-    for (const s of segs) {
-      const last = merged.at(-1);
-      if (last && s.start <= last.end + 1) {
-        last.end = Math.max(last.end, s.end);
-        if (s.rank < last.rank) Object.assign(last, { rank: s.rank, title: s.title || last.title });
-      } else merged.push(s);
-    }
-    if (!Number.isFinite(targetSeconds)) return merged;
-
-    // Cut long points back to the last full sentence that fits (never mid-sentence: an overlong single
-    // sentence is kept whole).
-    const maxLen = Math.min(90, Math.max(20, targetSeconds * 0.4));
-    for (const s of merged) {
-      if (s.end - s.start <= maxLen) continue;
-      const inside = sents.filter((x) => x.start >= s.start - 0.01 && x.end <= s.end + 0.01);
-      if (!inside.length) { s.end = s.start + maxLen; continue; }
-      s.end = inside.filter((x) => x.end <= s.start + maxLen).at(-1)?.end ?? inside[0].end;
-    }
-    // Best first; keep whatever fits in the budget.
-    const budget = targetSeconds * 1.1;
-    let used = 0;
-    const kept = [...merged].sort((a, b) => a.rank - b.rank || a.start - b.start)
-      .filter((s) => used + (s.end - s.start) <= budget && (used += s.end - s.start, true));
-    if (!kept.length && merged.length) {
-      const best = [...merged].sort((a, b) => a.rank - b.rank)[0];
-      kept.push({ ...best, end: Math.min(best.end, best.start + budget) });
-    }
-    // A little lead-in and tail so the first and last words aren't clipped.
-    return kept.sort((a, b) => a.start - b.start)
-      .map((s) => ({ ...s, start: Math.max(0, s.start - 0.15), end: Math.min(s.end + 0.3, dur) }));
-  }
-
-  // For picking cut points the model needs a time per sentence, not one per 20-second block.
-  function withSentenceTranscript(ctx) {
-    if (!ctx.sentences?.length) return ctx;
-    const text = ctx.sentences.map((s) => `[${fmtTime(s.start)}] ${s.text}`).join("\n");
-    // ponytail: very long videos fall back to the 20-second blocks; split the request if that hurts quality.
-    if (text.length > MAX_TRANSCRIPT_CHARS) return ctx;
-    return { ...ctx, transcript: text, builtinTranscript: undefined };
-  }
-
-  function cutMarkdown(segs, total) {
-    const len = segs.reduce((sum, s) => sum + s.end - s.start, 0);
-    return [
-      `**Short version: ${fmtDuration(len)}${total ? ` instead of ${fmtDuration(total)}` : ""}** (${segs.length} parts)`,
-      "",
-      ...segs.map((s, i) => `${i + 1}. [${fmtTime(s.start)}] ${s.title || "Untitled"} (${fmtDuration(s.end - s.start)}${s.rank ? `, key point #${s.rank}` : ""})`)
-    ].join("\n");
-  }
-
-  let activeCut = null;
-
-  function playCut(segs) {
-    stopCut();
-    const video = $("video");
-    if (!video) return;
-    const label = el("div", { id: "yta-cut-label" });
-    $("#movie_player")?.append(label);
-    const cut = activeCut = { segs, i: 0, video, label };
-    const go = (i) => {
-      cut.i = i;
-      video.currentTime = segs[i].start;
-      video.play?.();
-      const text = `Short version · ${i + 1} of ${segs.length}${segs[i].title ? " · " + segs[i].title : ""}`;
-      label.textContent = text;
-      setStatus(text, "yta-ok");
-    };
-    cut.onTime = () => {
-      if ($(".ad-showing")) return;
-      const s = segs[cut.i], t = video.currentTime;
-      // The viewer jumped somewhere else themselves: hand control back to them.
-      if (t < s.start - 3 || t > s.end + 3) return stopCut("Stopped the short version because you jumped elsewhere.");
-      if (t < s.end) return;
-      if (cut.i + 1 < segs.length) go(cut.i + 1);
-      else { video.pause(); stopCut("That's the short version. Press play to keep watching from here."); }
-    };
-    video.addEventListener("timeupdate", cut.onTime);
-    go(0);
-    syncCutButtons();
-  }
-
-  function stopCut(message) {
-    if (!activeCut) return;
-    activeCut.video.removeEventListener("timeupdate", activeCut.onTime);
-    activeCut.label.remove();
-    activeCut = null;
-    syncCutButtons();
-    if (message) setStatus(message, "yta-ok");
-  }
-
-  // Only one short version plays at a time; its button becomes Stop.
-  function syncCutButtons() {
-    document.querySelectorAll("#yta-panel .yta-cut-btn").forEach((btn) => {
-      btn.textContent = btn.ytaCut === activeCut?.segs ? "■ Stop" : "▶ Play short version";
-    });
-  }
 
   // ---------- Flashcards: Quizlet and Anki ----------
 
   // Cards from the model's JSON: trimmed, single-line (tabs and line breaks are the import separators),
   // de-duplicated, capped at the number asked for.
+  // The JSON array in a model reply (models often wrap it in prose), or [].
+  function jsonArray(text) {
+    try {
+      const raw = JSON.parse(String(text).match(/\[[\s\S]*\]/)?.[0]);
+      return Array.isArray(raw) ? raw : [];
+    } catch { return []; }
+  }
+
+  const cleanText = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
+  // Timestamps belong in `time`; models sometimes also write them (or links) into the text.
+  const stripTimes = (v) => cleanText(v).replace(/\[?\(?\d{1,2}:\d{2}(?::\d{2})?\)?\]?(\(https?:[^)]*\))?/g, "")
+    .replace(/\s+([.,;:!?])/g, "$1").replace(/\s{2,}/g, " ").trim();
+
   function parseCards(text, max, dur = Infinity) {
-    let raw;
-    try { raw = JSON.parse(text.match(/\[[\s\S]*\]/)?.[0]); } catch { return []; }
-    if (!Array.isArray(raw)) return [];
-    const clean = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
+    const raw = jsonArray(text);
     const seen = new Set();
     const cards = [];
     for (const r of raw) {
-      // Timestamps belong in `time`; models sometimes also write them (or links) into the text.
-      const strip = (v) => clean(v).replace(/\[?\(?\d{1,2}:\d{2}(?::\d{2})?\)?\]?(\(https?:[^)]*\))?/g, "").replace(/\s+([.,;:!?])/g, "$1").replace(/\s{2,}/g, " ").trim();
-      const front = strip(r?.front ?? r?.term ?? r?.question), back = strip(r?.back ?? r?.definition ?? r?.answer);
+      const front = stripTimes(r?.front ?? r?.term ?? r?.question), back = stripTimes(r?.back ?? r?.definition ?? r?.answer);
       if (!front || !back || seen.has(front.toLowerCase())) continue;
       seen.add(front.toLowerCase());
       const t = toSeconds(r?.time);
@@ -1096,6 +832,182 @@ RULES
     setStatus("Downloaded. In Anki: File → Import, choose the file.", "yta-ok");
   }
 
+  // ---------- Quiz ----------
+
+  // Questions from the model's JSON: 2-6 unique choices with a valid answer (index, letter, or the choice's
+  // text). Choices are shuffled, because models put the right answer first far too often.
+  function parseQuiz(text, max, dur = Infinity, random = Math.random) {
+    const quiz = [];
+    for (const r of jsonArray(text)) {
+      const question = stripTimes(r?.question);
+      const choices = [...new Set((Array.isArray(r?.choices) ? r.choices : []).map(stripTimes).filter(Boolean))];
+      if (!question || choices.length < 2 || choices.length > 6) continue;
+      const a = r?.answer;
+      const answer = typeof a === "number" ? a
+        : /^[A-F]$/i.test(String(a ?? "").trim()) ? String(a).trim().toUpperCase().charCodeAt(0) - 65
+        : choices.findIndex((c) => c.toLowerCase() === cleanText(a).toLowerCase());
+      if (!Number.isInteger(answer) || answer < 0 || answer >= choices.length) continue;
+      const order = choices.map((_, i) => i);
+      for (let i = order.length - 1; i > 0; i--) {
+        const j = Math.floor(random() * (i + 1));
+        [order[i], order[j]] = [order[j], order[i]];
+      }
+      const t = toSeconds(r?.time);
+      quiz.push({
+        question, choices: order.map((i) => choices[i]), answer: order.indexOf(answer),
+        explanation: stripTimes(r?.explanation),
+        ...(Number.isFinite(t) && t >= 0 && t < dur ? { t } : {})
+      });
+      if (quiz.length >= max) break;
+    }
+    return quiz;
+  }
+
+  // Text version, for Copy and so follow-up questions can refer to the quiz.
+  function quizMarkdown(quiz) {
+    return [`**Quiz: ${quiz.length} questions**`, "", ...quiz.map((q, i) =>
+      `${i + 1}. ${q.question} Answer: ${q.choices[q.answer]}.${q.explanation ? ` ${q.explanation}` : ""}`)].join("\n");
+  }
+
+  function renderQuiz(quiz) {
+    const box = el("div", { class: "yta-quiz" });
+    const score = el("p", { class: "yta-quiz-score", "aria-live": "polite" });
+    let answered = 0, correct = 0;
+    quiz.forEach((q, qi) => {
+      const feedback = el("div", { class: "yta-quiz-feedback", "aria-live": "polite" });
+      const item = el("div", { class: "yta-quiz-q" },
+        el("p", { class: "yta-quiz-text" }, el("strong", { text: `${qi + 1}. ` }), q.question));
+      const choices = q.choices.map((c, ci) => el("button", { class: "yta-choice", text: c, onclick: () => {
+        if (item.dataset.done) return;
+        item.dataset.done = "1";
+        const right = ci === q.answer;
+        answered++;
+        if (right) correct++;
+        choices.forEach((b, bi) => {
+          b.disabled = true;
+          if (bi === q.answer) b.classList.add("yta-right");
+          else if (bi === ci) b.classList.add("yta-wrong");
+        });
+        feedback.append(el("p", { text: `${right ? "✓ Correct." : `✗ The answer is: ${q.choices[q.answer]}.`} ${q.explanation}`.trim() }));
+        if (!right && q.t != null) {
+          feedback.append(el("button", { class: "yta-secondary", text: `▶ Rewatch from ${fmtTime(q.t)}`, onclick: () => seekTo(q.t) }));
+        }
+        if (answered === quiz.length) score.textContent = `Score: ${correct} / ${quiz.length}`;
+      } }));
+      item.append(el("div", { class: "yta-choices" }, ...choices), feedback);
+      box.append(item);
+    });
+    box.append(score);
+    return box;
+  }
+
+  // ---------- Daily review: spaced repetition across every video ----------
+  // ponytail: the whole deck in one storage key; fine for thousands of cards, split by video if it outgrows that.
+
+  const DECK_KEY = "studyDeck";
+  const DAY = 24 * 60 * 60 * 1000;
+
+  // New cards from a video, minus ones already in the deck (same video, same front). Due right away.
+  function mergeIntoDeck(deck, cards, video, now = Date.now()) {
+    const have = new Set(deck.map((c) => `${c.videoId}|${c.front.toLowerCase()}`));
+    const fresh = cards.filter((c) => !have.has(`${video.id}|${c.front.toLowerCase()}`)).map((c, i) => ({
+      id: `${video.id}-${now}-${i}`, videoId: video.id, videoTitle: video.title,
+      front: c.front, back: c.back, ...(c.t != null ? { t: c.t } : {}),
+      due: now, interval: 0, ease: 2.5, reps: 0
+    }));
+    return { deck: [...deck, ...fresh], added: fresh.length };
+  }
+
+  // Simplified SM-2. "Again": see it again in 10 minutes and start over. "Good": 1 day, then 3, then the gap
+  // times the card's ease. "Easy": a longer gap, and the card gets easier from then on.
+  function schedule(card, grade, now = Date.now()) {
+    const c = { ...card };
+    if (grade === "again") {
+      return { ...c, reps: 0, interval: 0, ease: Math.max(1.3, c.ease - 0.2), due: now + 10 * 60 * 1000 };
+    }
+    c.reps += 1;
+    const base = c.reps === 1 ? 1 : c.reps === 2 ? 3 : Math.max(1, Math.round(c.interval * c.ease));
+    if (grade === "easy") {
+      c.interval = Math.max(base + 1, Math.round(base * 1.3));
+      c.ease += 0.15;
+    } else c.interval = base;
+    c.due = now + c.interval * DAY;
+    return c;
+  }
+
+  const dueCards = (deck, now = Date.now()) => deck.filter((c) => c.due <= now).sort((a, b) => a.due - b.due);
+
+  async function loadDeck() {
+    return (await chrome.storage.local.get(DECK_KEY))[DECK_KEY] || [];
+  }
+
+  async function addToDeck(cards) {
+    if (!alive()) return 0;
+    const video = { id: state.videoId, title: state.ctx?.title || document.title.replace(/ - YouTube$/, "") };
+    const { deck, added } = mergeIntoDeck(await loadDeck(), cards, video);
+    await chrome.storage.local.set({ [DECK_KEY]: deck });
+    return added;
+  }
+
+  async function updateDueBadge() {
+    const badge = $("#yta-due");
+    if (!badge || !chrome.runtime?.id) return;
+    const n = dueCards(await loadDeck()).length;
+    badge.textContent = n ? String(n) : "";
+    badge.hidden = !n;
+  }
+  chrome.storage.onChanged.addListener((changes) => { if (DECK_KEY in changes) updateDueBadge(); });
+  setInterval(updateDueBadge, 60 * 1000); // cards come due while the page is open
+
+  // One card at a time, in the thread (not saved to the chat). Answers link back to the video moment.
+  async function startReview() {
+    if (!alive() || state.busy) return;
+    $("#yta-review-box")?.remove();
+    const box = el("div", { class: "yta-msg yta-assistant yta-review", id: "yta-review-box" });
+    $("#yta-thread").append(box);
+    const queue = dueCards(await loadDeck());
+    const total = queue.length;
+    let done = 0;
+    const show = () => {
+      box.replaceChildren();
+      const card = queue.shift();
+      if (!card) {
+        box.append(
+          el("p", { text: total
+            ? `All done for today: ${total} card${total === 1 ? "" : "s"} reviewed.`
+            : "Nothing to review right now. Make flashcards on any video and they'll show up here when they're due." }),
+          el("button", { class: "yta-secondary", text: "Close", onclick: () => box.remove() }));
+        return;
+      }
+      const jump = card.t == null ? null
+        : card.videoId === state.videoId
+          ? el("button", { class: "yta-mini", text: `▶ ${fmtTime(card.t)} in this video`, onclick: () => seekTo(card.t) })
+          : el("a", { class: "yta-mini", href: `https://www.youtube.com/watch?v=${card.videoId}&t=${Math.floor(card.t)}s`,
+              target: "_blank", rel: "noopener", text: `▶ ${fmtTime(card.t)} in the video` });
+      const grades = [["again", "Again"], ["good", "Good"], ["easy", "Easy"]].map(([g, text]) => el("button", {
+        class: g === "good" ? "yta-primary" : "yta-secondary", text,
+        onclick: async () => {
+          const deck = await loadDeck();
+          const i = deck.findIndex((c) => c.id === card.id);
+          if (i >= 0) deck[i] = schedule(deck[i], g);
+          await chrome.storage.local.set({ [DECK_KEY]: deck });
+          if (g === "again") queue.push(deck[i] || card); // see it again this session
+          else done++;
+          show();
+        }
+      }));
+      const answer = el("div", { class: "yta-review-answer", hidden: "" },
+        el("p", { text: card.back }), jump, el("div", { class: "yta-grades" }, ...grades));
+      box.append(
+        el("p", { class: "yta-review-meta", text: `Card ${done + 1} of ${total} · ${card.videoTitle || "a video"}` }),
+        el("p", { class: "yta-review-front", text: card.front }),
+        el("button", { class: "yta-primary", text: "Show answer", onclick: (e) => { e.currentTarget.remove(); answer.hidden = false; } }),
+        answer);
+      $("#yta-thread").scrollTop = $("#yta-thread").scrollHeight;
+    };
+    show();
+  }
+
   // ---------- History ----------
   // ponytail: one key per video, never evicted; add LRU pruning if chrome.storage.local (10 MB) fills up.
 
@@ -1110,7 +1022,7 @@ RULES
     const saved = (await chrome.storage.local.get(historyKey(videoId)))[historyKey(videoId)];
     if (!saved?.length || state?.videoId !== videoId || state.messages.length) return;
     state.messages = saved;
-    for (const m of saved) addMessage(m.role, m.role === "user" ? m.label || m.content : m.content, { cut: m.cut, cards: m.cards });
+    for (const m of saved) addMessage(m.role, m.role === "user" ? m.label || m.content : m.content, { cards: m.cards, quiz: m.quiz });
   }
 
   function clearHistory() {
@@ -1143,9 +1055,8 @@ RULES
     if (!videoId) { existing?.remove(); state = null; return; }
     if (state && state.videoId === videoId && existing && existing.isConnected) return;
 
-    stopCut();
     existing?.remove();
-    state = { videoId, mode: "summarize", ctx: null, ctxPromise: null, messages: [], busy: false };
+    state = { videoId, mode: "chat", ctx: null, ctxPromise: null, messages: [], busy: false };
 
     const tryMount = () => {
       const mp = findMountPoint();
@@ -1157,9 +1068,10 @@ RULES
         panel.style.setProperty("--yta-player-h", `${player.offsetHeight}px`);
         playerSize.observe(player);
       }
-      setMode("summarize");
+      setMode("chat");
       setStatus("Ready");
       restoreHistory(videoId);
+      updateDueBadge();
       // Warm the transcript in the background so the first request is fast.
       ensureContext().catch(() => {});
     };

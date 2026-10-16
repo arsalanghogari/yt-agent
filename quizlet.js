@@ -83,7 +83,7 @@
     const { quizletPending: job } = await chrome.storage.local.get("quizletPending");
     if (!job || Date.now() - job.at > FRESH_MS) return;
     if (/\/(login|sign-?up)/.test(location.pathname)) {
-      banner("Log in to Quizlet and your flashcards from AI Agent for YouTube will be filled in for you.", true);
+      banner("Log in to Quizlet and your flashcards from Study Pal for YouTube will be filled in for you.", true);
       return;
     }
     if (!/create/.test(location.pathname)) return;
@@ -128,7 +128,7 @@
         .find((f) => visible(f) && /title/i.test(`${f.placeholder || ""} ${f.getAttribute("aria-label") || ""} ${f.name || ""}`));
       if (title && !(title.value || title.textContent || "").trim()) setValue(title, job.title);
 
-      banner(`Added ${taken} flashcards from AI Agent for YouTube. Check them, then click Create.`, true);
+      banner(`Added ${taken} flashcards from Study Pal for YouTube. Check them, then click Create.`, true);
     } catch {
       banner("Couldn't fill in Quizlet automatically. Your flashcards are on your clipboard: click Import, paste them (⌘V or Ctrl+V), then click Import.", false);
     } finally {

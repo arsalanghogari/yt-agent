@@ -1,4 +1,4 @@
-/* AI Agent for YouTube panel. Prefixed yta- to avoid clashing with YouTube styles. */
+/* Study Pal for YouTube panel. Prefixed yta- to avoid clashing with YouTube styles. */
 
 #yta-panel {
   --yta-bg: #f2f2f2;
@@ -153,11 +153,43 @@ ytd-watch-flexy:not([theater]):not([fullscreen]) #secondary #yta-panel:not(.yta-
 }
 #yta-panel .yta-secondary:hover { background: rgba(128,128,128,.15); }
 
-/* Short version */
-#yta-panel .yta-cut-btn { margin-top: 10px; }
-#yta-cut-label {
-  position: absolute; top: 14px; left: 14px; z-index: 60; max-width: calc(100% - 28px);
-  padding: 6px 12px; border-radius: 16px; background: rgba(0, 0, 0, .75); color: #fff;
-  font: 600 13px "Roboto", "Arial", sans-serif; pointer-events: none;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+
+/* Chat tab: the chat box at the bottom is the input, so it's always shown and there's no Go button */
+#yta-panel[data-mode="chat"] .yta-followup { display: flex; }
+#yta-panel[data-mode="chat"] #yta-run { display: none; }
+
+/* Review button in the header, with the number of cards due */
+#yta-panel .yta-review-btn {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid var(--yta-line);
+  border-radius: 15px; background: transparent; color: var(--yta-fg); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
 }
+#yta-panel .yta-review-btn:hover { background: rgba(128,128,128,.15); }
+#yta-panel .yta-badge {
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--yta-accent); color: var(--yta-accent-fg);
+  font-size: 11px; line-height: 18px; text-align: center;
+}
+#yta-panel .yta-badge[hidden] { display: none; }
+
+/* Quiz */
+#yta-panel .yta-quiz-q { padding: 4px 0 12px; border-bottom: 1px solid var(--yta-line); margin-bottom: 10px; }
+#yta-panel .yta-quiz-q:last-of-type { border-bottom: 0; }
+#yta-panel .yta-quiz-text { margin: 0 0 8px; }
+#yta-panel .yta-choices { display: flex; flex-direction: column; gap: 6px; }
+#yta-panel .yta-choice {
+  text-align: left; padding: 8px 12px; border: 1px solid var(--yta-line); border-radius: 8px;
+  background: transparent; color: var(--yta-fg); font: inherit; cursor: pointer;
+}
+#yta-panel .yta-choice:hover:not(:disabled) { background: rgba(128,128,128,.15); }
+#yta-panel .yta-choice:disabled { cursor: default; opacity: .75; }
+#yta-panel .yta-choice.yta-right { border-color: #2ba640; background: rgba(43,166,64,.15); opacity: 1; }
+#yta-panel .yta-choice.yta-wrong { border-color: var(--yta-accent); background: rgba(230,33,23,.12); opacity: 1; }
+#yta-panel .yta-quiz-feedback p { margin: 8px 0 6px; font-size: 13px; }
+#yta-panel .yta-quiz-score { margin: 4px 0 0; font-weight: 600; }
+#yta-panel .yta-quiz-score:empty { display: none; }
+
+/* Daily review */
+#yta-panel .yta-review-meta { margin: 0 0 6px; font-size: 12px; color: var(--yta-muted); }
+#yta-panel .yta-review-front { margin: 0 0 10px; font-size: 15px; font-weight: 600; }
+#yta-panel .yta-review-answer p { margin: 0 0 6px; }
+#yta-panel .yta-review-answer a.yta-mini { text-decoration: none; display: inline-block; }
+#yta-panel .yta-grades { display: flex; gap: 8px; margin-top: 10px; }

@@ -17,8 +17,6 @@ const DEFAULTS = {
   apiKey: "",
   model: "",
   baseUrl: "",
-  analogyDomain: "",
-  persona: "",
   language: "English",
   maxTokens: 1500
 };
@@ -45,8 +43,6 @@ function readForm() {
     apiKey: $("apiKey").value.trim(),
     model: $("model").value.trim(),
     baseUrl: $("baseUrl").value.trim().replace(/\/+$/, ""),
-    analogyDomain: $("analogyDomain").value.trim(),
-    persona: $("persona").value.trim(),
     language: $("language").value.trim() || "English",
     maxTokens: Math.max(200, Math.min(8000, Number($("maxTokens").value) || 1500))
   };
@@ -82,8 +78,6 @@ async function load() {
   $("apiKey").value = cfg.apiKey;
   $("model").value = cfg.model || MODEL_SUGGESTIONS[cfg.provider]?.[0] || "";
   $("baseUrl").value = cfg.baseUrl;
-  $("analogyDomain").value = cfg.analogyDomain;
-  $("persona").value = cfg.persona;
   $("language").value = cfg.language;
   $("maxTokens").value = cfg.maxTokens;
 }

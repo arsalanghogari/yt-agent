@@ -1,13 +1,14 @@
-# Privacy Policy: AI Agent for YouTube
+# Privacy Policy: Study Pal for YouTube
 
-Last updated: 2026-10-10
+Last updated: 2026-10-15
 
-AI Agent for YouTube is a browser extension that runs entirely in your browser. It has no server of its own, and the developer does not collect, receive, or store any of your data.
+Study Pal for YouTube is a browser extension that runs entirely in your browser. It has no server of its own, and the developer does not collect, receive, or store any of your data.
 
 ## What the extension handles
 
 - **Your settings** (which AI to use, and if you choose a provider: your API key, model and endpoint URL; plus your preferences) are stored in Chrome's local extension storage on your device.
 - **Video content**: when you ask for a summary, explanation, or commentary, the extension reads the open video's title, channel, description, tags, and captions from youtube.com.
+- **Your study deck**: flashcards you make are kept in Chrome's local extension storage on your device, with when each is next due for review. Removing the extension deletes them.
 - **Your prompts and chat history**: what you type, and the answers you get, are saved per video in Chrome's local extension storage on your device so they are there when you return. The 🗑 button deletes a video's chat. Removing the extension deletes everything.
 
 ## Where data is sent
