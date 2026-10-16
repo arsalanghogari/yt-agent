@@ -339,7 +339,14 @@ RULES
   // Read synchronously by the click handlers, so kept up to date here (the API key itself isn't kept).
   const prefs = { provider: "builtin", language: "English" };
   const loadPrefs = () => chrome.storage.local.get(["provider", "apiKey", "baseUrl", "model", "language"])
-    .then((c) => Object.assign(prefs, { provider: effectiveProvider(c), language: c.language || "English" }));
+    .then((c) => Object.assign(prefs, { provider: effectiveProvider(c), language: c.language || "English" }))
+    .then(syncUpsell);
+
+  // On the free on-device AI, a quiet pointer to adding your own key for stronger answers.
+  function syncUpsell() {
+    const u = document.getElementById("yta-upsell");
+    if (u) u.hidden = prefs.provider !== "builtin";
+  }
   loadPrefs();
   chrome.storage.onChanged.addListener((changes) => {
     if (["provider", "apiKey", "baseUrl", "model", "language"].some((k) => k in changes)) loadPrefs();
@@ -635,7 +642,11 @@ RULES
     );
     chatBox.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); sendFollowup(); } });
 
-    const body = el("div", { class: "yta-body" }, tabs, form, thread, intro, chatBox);
+    const upsell = el("p", { class: "yta-upsell", id: "yta-upsell", hidden: "" }, "Free on-device AI. ",
+      el("button", { class: "yta-link-btn", text: "Want sharper answers? Add your own AI key",
+        onclick: () => alive() && chrome.runtime.sendMessage({ type: "openOptions" }) }));
+
+    const body = el("div", { class: "yta-body" }, tabs, form, thread, intro, chatBox, upsell);
     panel.append(header, body);
     return panel;
   }
@@ -1148,6 +1159,7 @@ RULES
       setStatus("Ready");
       restoreHistory(videoId);
       updateDueBadge();
+      syncUpsell();
       // Warm the transcript in the background so the first request is fast.
       ensureContext().catch(() => {});
     };

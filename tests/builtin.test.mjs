@@ -18,6 +18,7 @@ class FakeSession {
 const ctx = {
   chrome: { storage: { local: { get: async () => ({}) }, onChanged: { addListener() {} } } },
   LanguageModel: { create: async (o) => { if (createFails) throw createFails; return new FakeSession(o); }, availability: async () => availability },
+  document: { getElementById: () => null },
   setStatus: (t) => statuses.push(t), buildSystem: (c, lang) => `SYSTEM[${lang}]\n${c.transcript}`, console, Error, Promise, Math, Set
 };
 vm.createContext(ctx);
