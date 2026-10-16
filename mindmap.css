@@ -1,0 +1,51 @@
+/* Mind maps (render.js renderMindMap), shared by the YouTube panel, the library page and shared study
+   packs. A left-to-right tree: topic -> branches -> points, joined by connector lines; each branch has a
+   colour (--mm). Dark when YouTube is dark (html[dark]) or the library page is (html.sp-dark). */
+
+.yta-mm {
+  --mm-0: #d93025; --mm-1: #1a73e8; --mm-2: #188038; --mm-3: #b45a00; --mm-4: #8430ce; --mm-5: #007b83;
+  --mm-ink: #111114; --mm-line: #a0a0a8;
+  display: flex; align-items: center; min-width: max-content; padding: 4px 2px;
+  font-size: 13px; line-height: 1.35; color: var(--mm-ink);
+}
+html[dark] .yta-mm, html.sp-dark .yta-mm {
+  --mm-0: #ff7b72; --mm-1: #6cb4ff; --mm-2: #5fd08a; --mm-3: #f0a14a; --mm-4: #c79bff; --mm-5: #4fd1d9;
+  --mm-ink: #f1f1f1; --mm-line: #6a6a72;
+}
+
+.yta-mm-kids { position: relative; display: flex; flex-direction: column; justify-content: center; padding-left: 16px; }
+.yta-mm-kids::before {
+  content: ""; position: absolute; left: 0; top: 50%; width: 8px; border-top: 2px solid var(--mm, var(--mm-line));
+}
+.yta-mm-branch { position: relative; display: flex; align-items: center; padding: 3px 0 3px 8px; }
+.yta-mm-branch::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; border-left: 2px solid var(--mm, var(--mm-line));
+}
+.yta-mm-branch:first-child::before { top: 50%; }
+.yta-mm-branch:last-child::before { bottom: 50%; }
+.yta-mm-branch:only-child::before { display: none; }
+.yta-mm-branch::after {
+  content: ""; position: absolute; left: 0; top: 50%; width: 8px; border-top: 2px solid var(--mm, var(--mm-line));
+}
+
+.yta-mm-node {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  max-width: 170px; padding: 6px 10px; border-radius: 10px; text-wrap: pretty;
+}
+.yta-mm-topic {
+  max-width: 130px; padding: 9px 12px; background: var(--mm-ink); color: #fff;
+  font-weight: 700; font-size: 14px; letter-spacing: -.005em;
+}
+html[dark] .yta-mm-topic, html.sp-dark .yta-mm-topic { color: #111114; }
+.yta-mm-main {
+  border: 1.5px solid var(--mm); background: color-mix(in srgb, var(--mm) 13%, transparent); font-weight: 650;
+}
+.yta-mm-leaf { border: 1px solid color-mix(in srgb, var(--mm) 38%, transparent); font-size: 12.5px; }
+.yta-mm-node a.yta-ts { font-size: 11.5px; }
+
+/* In the sidebar panel the map is narrower, and scrolls sideways if it must. */
+#yta-panel .yta-mm-scroll { overflow-x: auto; margin: 0 -4px; padding: 0 4px 4px; }
+#yta-panel .yta-mm-topic { max-width: 92px; font-size: 13px; }
+#yta-panel .yta-mm-main { max-width: 116px; }
+#yta-panel .yta-mm-leaf { max-width: 136px; }
+#yta-panel .yta-mm-kids { padding-left: 14px; }

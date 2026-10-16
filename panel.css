@@ -142,7 +142,8 @@ html[dark] #yta-panel .yta-primary, html[dark] #yta-panel .yta-send { --yta-acce
 #yta-panel .yta-primary:disabled { opacity: .5; cursor: default; transform: none; }
 #yta-panel .yta-go { flex: none; }
 #yta-panel[data-mode="chat"] .yta-go { display: none; }
-#yta-panel[data-mode="notes"] .yta-go { flex: 1 1 auto; }
+#yta-panel .yta-go-map { display: none; flex: none; gap: 6px; height: 36px; border-radius: 18px; }
+#yta-panel[data-mode="notes"] .yta-go-map { display: inline-flex; }
 #yta-panel .yta-secondary {
   display: inline-flex; align-items: center; height: 34px; padding: 0 14px;
   border: 1px solid var(--yta-line); border-radius: 17px; background: var(--yta-raised);

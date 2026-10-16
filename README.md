@@ -6,7 +6,10 @@ A study companion in a panel next to the YouTube player, for learning from the v
 2. **Notes**: study notes to review instead of rewatching: overview, key ideas, key terms, examples, and what to remember. **Save as PDF** opens a print-ready page with clickable timestamps; choose Save as PDF in the print window.
 3. **Flashcards**: 10–30 cards (term → definition or question → answer), each linking back to the moment it's explained. They're added to your daily review automatically. **Send to Quizlet** fills in a new Quizlet set in your browser for you to check and create (Quizlet has no public API; if its page has changed, the cards are on your clipboard to paste into its Import box). **Download for Anki** saves a file Anki imports directly.
 4. **Quiz**: a multiple-choice quiz on what the video teaches. Wrong answers show why, with a link to rewatch the part that covers it.
-5. **Daily review**: flashcards from every video you've studied, shown when they're due (spaced repetition: Again / Good / Easy). The **Review** button shows how many are due.
+5. **Mind maps**: from the Notes tab, the whole video as a mind map (topic → main ideas → details), each linked to its moment.
+6. **Library**: every video you've studied in one page, with search, its notes, mind map, flashcards, quiz and chat. Open it from the 📚 button in the panel or the toolbar icon.
+7. **Share study packs**: from the library, download one file with a video's notes, mind map, flashcards and quiz that anyone can open in a browser, no extension needed.
+8. **Daily review**: flashcards from every video you've studied, shown when they're due (spaced repetition: Again / Good / Easy). The **Review** button shows how many are due.
 
 Answers stream in as they are written. Every timestamp in an answer is clickable and seeks the player. Follow-up questions keep the thread going, and each video's chat is saved so it is still there when you come back (🗑 clears it).
 
@@ -68,6 +71,9 @@ background.js     provider adapters + message routing
 content.js        transcript fetch, panel UI, prompts
 quizlet.js        fills in Quizlet's create-set page with flashcards from the panel
 notes.html/js     print-ready study notes page (Save as PDF)
+library.html/js   the library page (and study pack export)
+render.js         rendering shared by the panel and the library (markdown, mind maps, icons)
+mindmap.css       mind map styles (panel, library, study packs)
 panel.css         panel styles (light + dark)
 options.html/js   settings page
 icons/            toolbar icons

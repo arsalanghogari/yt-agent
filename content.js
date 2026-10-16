@@ -15,28 +15,8 @@
 
   const $ = (sel, root = document) => root.querySelector(sel);
 
-  function el(tag, attrs = {}, ...children) {
-    const n = document.createElement(tag);
-    for (const [k, v] of Object.entries(attrs)) {
-      if (k === "class") n.className = v;
-      else if (k === "text") n.textContent = v;
-      else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
-      else n.setAttribute(k, v);
-    }
-    for (const c of children) if (c != null) n.append(c);
-    return n;
-  }
-
-  function fmtTime(sec) {
-    sec = Math.max(0, Math.floor(sec));
-    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
-    return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
-  }
-
-  function parseTime(str) {
-    const p = str.split(":").map(Number);
-    return p.reduce((a, b) => a * 60 + b, 0);
-  }
+  const { el, fmtTime, parseTime, toSeconds, icon, parseMindMap, mindMapMarkdown, renderMindMap } = globalThis.StudyPal;
+  const renderMarkdown = (md) => globalThis.StudyPal.renderMarkdown(md, { onTime: seekTo });
 
   function getVideoId() {
     const u = new URL(location.href);
@@ -285,6 +265,14 @@ RULES
         "Be accurate and complete, but don't pad: leave out a section if the video has nothing for it."
       ].join("\n");
     }
+    if (mode === "map") {
+      return [
+        "Make a mind map of what this video teaches.",
+        "topic: the video's main subject in 2 to 5 words. branches: the 4 to 6 main ideas, in the order the video covers them, each 2 to 5 words. points: for each branch, the 2 to 4 most important details, examples or facts, each under 8 words. Give the timestamp where each branch and point is covered.",
+        "Use only what the video says. Short, concrete labels; no full sentences.",
+        'Reply with only a JSON object and no other text, like: {"topic":"How CRISPR works","branches":[{"label":"Cutting DNA","time":"3:36","points":[{"label":"Cas9 is the scissors","time":"3:36"},{"label":"Guide RNA sets the target","time":"3:52"}]}]}'
+      ].join("\n");
+    }
     if (mode === "quiz") {
       return [
         `Write a multiple-choice quiz of ${fields.quizCount} questions that checks whether I understood this video.`,
@@ -461,75 +449,19 @@ RULES
     return `**Error:** ${e?.message || e}`;
   }
 
-  // ---------- Icons ----------
-  // Inline SVG (24px grid, stroked, currentColor) so they follow the theme. Static strings only.
-  const ICONS = {
-    chat: '<path d="M4 5h16v11H9l-5 4z"/>',
-    notes: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 12h7M9 16h5"/>',
-    cards: '<rect x="3" y="7" width="14" height="12" rx="2"/><path d="M7 7V5h14v12h-4"/>',
-    quiz: '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/>',
-    review: '<path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4"/><path d="M12 8v4l3 2"/>',
-    trash: '<path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/>',
-    gear: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
-    send: '<path d="M12 19V5M6 11l6-6 6 6"/>',
-    chevron: '<path d="M6 9l6 6 6-6"/>',
-    spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>'
-  };
-  function icon(name, size = 18) {
-    const span = el("span", { class: "yta-ico", "aria-hidden": "true" });
-    span.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
-    return span;
-  }
-
   // ---------- Rendering ----------
-
-  function renderMarkdown(md) {
-    // Minimal, safe markdown -> DOM. Escapes HTML first, then converts a small subset.
-    const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const lines = md.split("\n");
-    let html = "", inList = null, inCode = false;
-    const closeList = () => { if (inList) { html += `</${inList}>`; inList = null; } };
-    const inline = (s) =>
-      esc(s)
-        .replace(/`([^`]+)`/g, "<code>$1</code>")
-        .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-        .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
-        .replace(/\[(\d{1,2}:\d{2}(?::\d{2})?)\]/g, '<a class="yta-ts" data-t="$1" href="#">$1</a>')
-        .replace(/\b(\d{1,2}:\d{2}(?::\d{2})?)\b(?![^<]*<\/a>)/g, (m0, t) => `<a class="yta-ts" data-t="${t}" href="#">${t}</a>`);
-
-    for (const raw of lines) {
-      const line = raw.replace(/\s+$/, "");
-      if (line.startsWith("```")) { closeList(); inCode = !inCode; html += inCode ? "<pre>" : "</pre>"; continue; }
-      if (inCode) { html += esc(line) + "\n"; continue; }
-      let m;
-      if ((m = line.match(/^(#{1,4})\s+(.*)/))) { closeList(); const lvl = Math.min(4, m[1].length + 2); html += `<h${lvl}>${inline(m[2])}</h${lvl}>`; continue; }
-      if ((m = line.match(/^\s*[-*•]\s+(.*)/))) { if (inList !== "ul") { closeList(); inList = "ul"; html += "<ul>"; } html += `<li>${inline(m[1])}</li>`; continue; }
-      if ((m = line.match(/^\s*\d+[.)]\s+(.*)/))) { if (inList !== "ol") { closeList(); inList = "ol"; html += "<ol>"; } html += `<li>${inline(m[1])}</li>`; continue; }
-      if (!line.trim()) { closeList(); continue; }
-      closeList();
-      html += `<p>${inline(line)}</p>`;
-    }
-    closeList();
-    if (inCode) html += "</pre>";
-    const wrap = document.createElement("div");
-    wrap.innerHTML = html;
-    wrap.querySelectorAll("a.yta-ts").forEach((a) =>
-      a.addEventListener("click", (e) => { e.preventDefault(); seekTo(parseTime(a.dataset.t)); })
-    );
-    return wrap;
-  }
 
   // Each tab keeps its own thread: a container per tab, and only the open tab's is inside #yta-thread.
   const box = (mode = state.mode) => state.boxes[mode];
 
-  function addMessage(role, content, { pending = false, cards = null, quiz = null, notes = false, to = box() } = {}) {
+  function addMessage(role, content, { pending = false, cards = null, quiz = null, notes = false, map = null, to = box() } = {}) {
     const thread = $("#yta-thread");
     const msg = el("div", { class: `yta-msg yta-${role}` });
     if (pending) {
       msg.classList.add("yta-pending");
       msg.append(el("span", { class: "yta-dots" }, el("i"), el("i"), el("i")));
     } else if (role === "assistant") {
-      fillAssistant(msg, content, { cards, quiz, notes });
+      fillAssistant(msg, content, { cards, quiz, notes, map });
     } else {
       msg.append(el("p", { text: content }));
     }
@@ -538,10 +470,15 @@ RULES
     return msg;
   }
 
-  function fillAssistant(msg, content, { streaming = false, cards = null, quiz = null, notes = false } = {}) {
+  function fillAssistant(msg, content, { streaming = false, cards = null, quiz = null, notes = false, map = null } = {}) {
     msg.classList.remove("yta-pending");
-    msg.replaceChildren(quiz ? renderQuiz(quiz) : cards ? renderCards(cards) : renderMarkdown(content));
+    msg.replaceChildren(quiz ? renderQuiz(quiz) : cards ? renderCards(cards)
+      : map ? el("div", { class: "yta-mm-scroll" }, renderMindMap(map, { onTime: seekTo })) : renderMarkdown(content));
     if (streaming) return;
+    if (map) {
+      msg.append(el("div", { class: "yta-card-actions" },
+        el("button", { class: "yta-secondary", text: "Open large in library", onclick: () => openLibrary() })));
+    }
     if (notes) {
       msg.append(el("div", { class: "yta-card-actions" },
         el("button", { class: "yta-primary", title: "Opens a print-ready page; choose Save as PDF", onclick: () => saveNotesPdf(content) },
@@ -579,7 +516,7 @@ RULES
   // id, tab label, icon, intro title, intro text, action button label
   const MODES = [
     ["chat", "Chat", "chat", "Ask me anything about this video", "I'll answer from the video and point you to the exact moment. Try one of these:"],
-    ["notes", "Notes", "notes", "Study notes in seconds", "The key ideas, terms and examples, so you can review without rewatching.", "Make study notes"],
+    ["notes", "Notes", "notes", "Study notes and mind maps", "The key ideas, terms and examples to review without rewatching, or the whole video as a mind map.", "Make study notes"],
     ["cards", "Flashcards", "cards", "Turn this video into flashcards", "They go into your daily review automatically, and you can send them to Quizlet or Anki.", "Make flashcards"],
     ["quiz", "Quiz", "quiz", "Check what stuck", "A quick multiple-choice quiz. Miss one and I'll show you the part to rewatch.", "Start the quiz"]
   ];
@@ -598,6 +535,7 @@ RULES
       el("div", { class: "yta-header-actions" },
         el("button", { class: "yta-review-btn", id: "yta-review", title: "Review the flashcards that are due today", onclick: startReview },
           icon("review", 16), el("span", { text: "Review" }), el("span", { class: "yta-badge", id: "yta-due", hidden: "" })),
+        el("button", { class: "yta-icon", title: "Your library: every video you've studied", "aria-label": "Open your library", onclick: () => openLibrary() }, icon("library")),
         el("button", { class: "yta-icon", title: "Clear this tab's conversation", "aria-label": "Clear this tab's conversation", onclick: clearHistory }, icon("trash")),
         el("button", { class: "yta-icon", title: "Settings", "aria-label": "Settings", onclick: () => alive() && chrome.runtime.sendMessage({ type: "openOptions" }) }, icon("gear")),
         el("button", { class: "yta-icon", id: "yta-toggle", title: "Expand / collapse", "aria-label": "Expand or collapse", onclick: () => panel.classList.toggle("yta-collapsed") }, icon("chevron"))
@@ -627,7 +565,8 @@ RULES
         el("select", { id: "yta-quiz-count", "aria-label": "Number of questions" },
           el("option", { value: "5", text: "5 questions" }),
           el("option", { value: "10", text: "10 questions" }))),
-      el("button", { id: "yta-run", class: "yta-primary yta-go", onclick: runMode }, icon("spark", 16), el("span", { id: "yta-run-label" })),
+      el("button", { id: "yta-run", class: "yta-primary yta-go", onclick: () => runMode() }, icon("spark", 16), el("span", { id: "yta-run-label" })),
+      el("button", { id: "yta-run-map", class: "yta-secondary yta-go-map", onclick: () => runMode("map") }, icon("map", 16), el("span", { text: "Make mind map" })),
       el("p", { class: "yta-notice", id: "yta-notice" })
     );
 
@@ -704,23 +643,23 @@ RULES
     return state.ctxPromise;
   }
 
-  async function runMode() {
+  async function runMode(kind) {
     if (!alive()) return;
     if (state.busy || state.mode === "chat") return;
     const builtinReady = prefs.provider === "builtin" ? startBuiltin(prefs.language) : null;
     builtinReady?.catch(() => {}); // awaited (and reported) in ask()
-    const mode = state.mode;
+    const mode = kind || state.mode;
     const cfg = await chrome.storage.local.get(["language"]);
     const fields = {
       cardCount: Number($("#yta-card-count").value) || 20,
       cardStyle: $("#yta-card-style").value,
       quizCount: Number($("#yta-quiz-count").value) || 5
     };
-    const label = mode === "notes" ? "Study notes"
+    const label = mode === "notes" ? "Study notes" : mode === "map" ? "Mind map"
       : mode === "quiz" ? `Quiz: ${fields.quizCount} questions`
       : `Flashcards: ${fields.cardCount} ${fields.cardStyle === "qa" ? "questions" : "terms"}`;
     await ask(buildTask(mode, fields), label, cfg.language, builtinReady,
-      { cards: mode === "cards" ? fields.cardCount : 0, quiz: mode === "quiz" ? fields.quizCount : 0, notes: mode === "notes" });
+      { cards: mode === "cards" ? fields.cardCount : 0, quiz: mode === "quiz" ? fields.quizCount : 0, notes: mode === "notes", map: mode === "map" });
   }
 
   async function sendFollowup() {
@@ -735,7 +674,7 @@ RULES
     await ask(q, q, cfg.language, builtinReady);
   }
 
-  async function ask(userContent, displayLabel, language, builtinReady, { cards = 0, quiz = 0, notes = false } = {}) {
+  async function ask(userContent, displayLabel, language, builtinReady, { cards = 0, quiz = 0, notes = false, map = false } = {}) {
     // Bound to the tab it was asked from, even if the student switches tabs while it's answering.
     const to = box(), messages = state.threads[state.mode];
     const configured = await chrome.runtime.sendMessage({ type: "isConfigured" });
@@ -751,9 +690,9 @@ RULES
       const builtin = configured.provider === "builtin";
       const builtinOpts = builtin ? await builtinReady : null; // model ready before the slower caption fetch
       const ctx = await ensureContext();
-      if ((cards || quiz) && !ctx.transcript) {
+      if ((cards || quiz || map) && !ctx.transcript) {
         pending.remove();
-        addMessage("assistant", `${cards ? "Flashcards" : "Quizzes"} need the video's captions, and none could be read for this video.`, { to });
+        addMessage("assistant", `${cards ? "Flashcards" : quiz ? "Quizzes" : "Mind maps"} need the video's captions, and none could be read for this video.`, { to });
         return;
       }
       messages.push({ role: "user", content: userContent, label: displayLabel });
@@ -761,7 +700,7 @@ RULES
       let frame = 0, latest = "";
       const onDelta = (text) => {
         latest = text;
-        if (cards || quiz) return; // the reply is JSON; keep the dots until it's turned into cards or a quiz
+        if (cards || quiz || map) return; // the reply is JSON; keep the dots until it's turned into cards, a quiz or a map
         // Re-render at most once per frame; only follow the bottom if the reader is already there.
         frame ||= requestAnimationFrame(() => {
           frame = 0;
@@ -778,9 +717,24 @@ RULES
       cancelAnimationFrame(frame);
       if (!res?.ok) {
         messages.pop();
-        if (res?.partial && !cards && !quiz) fillAssistant(pending, res.partial);
+        if (res?.partial && !cards && !quiz && !map) fillAssistant(pending, res.partial);
         else pending.remove();
         addMessage("assistant", builtin ? res.error : `**Error:** ${res?.error || "unknown"}\n\nCheck your key and model in ⚙ settings.`, { to });
+        return;
+      }
+      if (map) {
+        const tree = parseMindMap(res.text, ctx.lengthSeconds);
+        if (!tree) {
+          messages.pop();
+          pending.remove();
+          addMessage("assistant", "Couldn't read a mind map from the AI's answer. Press the button to try again.", { to });
+          return;
+        }
+        const content = mindMapMarkdown(tree);
+        messages.push({ role: "assistant", content, map: tree });
+        fillAssistant(pending, content, { map: tree });
+        saveHistory();
+        setStatus("Mind map ready", "yta-ok");
         return;
       }
       if (cards || quiz) {
@@ -813,8 +767,6 @@ RULES
       $("#yta-run").disabled = false;
     }
   }
-
-  const toSeconds = (v) => (typeof v === "number" ? v : parseTime(String(v ?? "").replace(/[^\d:]/g, "") || "NaN"));
 
   // ---------- Flashcards: Quizlet and Anki ----------
 
@@ -854,14 +806,7 @@ RULES
       `${i + 1}. **${c.front}**: ${c.back}${c.t != null ? ` [${fmtTime(c.t)}]` : ""}`)].join("\n");
   }
 
-  // One card per line, term and definition separated by a tab: the default format of Quizlet's import,
-  // and of Anki's text import. Each answer ends with a link back to the moment it's explained.
-  function cardsAsText(cards) {
-    return cards.map((c) => {
-      const link = c.t != null ? ` (video at ${fmtTime(c.t)}: youtu.be/${state.videoId}?t=${Math.floor(c.t)})` : "";
-      return `${c.front}\t${c.back}${link}`;
-    }).join("\n");
-  }
+  const cardsAsText = (cards) => globalThis.StudyPal.cardsText(cards, state.videoId);
 
   const setTitle = () => `${state.ctx?.title || document.title.replace(/ - YouTube$/, "")} (flashcards)`.slice(0, 120);
 
@@ -1131,8 +1076,17 @@ RULES
   const historyKey = (videoId) => `chat:${videoId}`;
   const emptyThreads = () => ({ chat: [], notes: [], cards: [], quiz: [] });
 
+  // The library (library.js) lists every video with a saved history, using these details.
   function saveHistory() {
-    chrome.storage.local.set({ [historyKey(state.videoId)]: state.threads });
+    const ctx = state.ctx || {};
+    chrome.storage.local.set({
+      [historyKey(state.videoId)]: state.threads,
+      [`video:${state.videoId}`]: { title: ctx.title || document.title.replace(/ - YouTube$/, ""), author: ctx.author || "", lengthSeconds: ctx.lengthSeconds || 0, updated: Date.now() }
+    });
+  }
+
+  function openLibrary() {
+    if (alive()) chrome.runtime.sendMessage({ type: "openLibrary", videoId: state?.videoId });
   }
 
   // Older versions saved one combined list: sort each exchange into the tab it came from.
@@ -1142,7 +1096,7 @@ RULES
     list.forEach((m, i) => {
       if (m.role === "user") {
         const a = list[i + 1];
-        tab = a?.cards ? "cards" : a?.quiz ? "quiz" : a?.notes ? "notes" : "chat";
+        tab = a?.cards ? "cards" : a?.quiz ? "quiz" : a?.notes || a?.map ? "notes" : "chat";
       }
       threads[tab].push(m);
     });
@@ -1156,7 +1110,7 @@ RULES
     state.threads = { ...emptyThreads(), ...(Array.isArray(saved) ? splitThreads(saved) : saved) };
     for (const [tab, list] of Object.entries(state.threads)) {
       for (const m of list) {
-        addMessage(m.role, m.role === "user" ? m.label || m.content : m.content, { cards: m.cards, quiz: m.quiz, notes: m.notes, to: box(tab) });
+        addMessage(m.role, m.role === "user" ? m.label || m.content : m.content, { cards: m.cards, quiz: m.quiz, notes: m.notes, map: m.map, to: box(tab) });
       }
     }
   }

@@ -199,6 +199,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     })();
     return true; // keep the channel open for the async response
   }
+  if (msg?.type === "openLibrary") {
+    chrome.tabs.create({ url: chrome.runtime.getURL(`library.html${msg.videoId ? "#" + msg.videoId : ""}`) });
+    sendResponse({ ok: true });
+    return false;
+  }
   if (msg?.type === "openNotesPdf") {
     chrome.tabs.create({ url: chrome.runtime.getURL("notes.html") });
     sendResponse({ ok: true });
@@ -227,5 +232,5 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 });
 
-chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());
+chrome.action.onClicked.addListener(() => chrome.tabs.create({ url: chrome.runtime.getURL("library.html") }));
 

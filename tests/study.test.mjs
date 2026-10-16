@@ -1,6 +1,6 @@
 // Quiz parsing and the daily-review scheduler in content.js.
 import fs from "fs"; import vm from "vm"; import assert from "assert";
-const src = fs.readFileSync(new URL("../content.js", import.meta.url), "utf8");
+const src = fs.readFileSync(new URL("../content.js", import.meta.url), "utf8") + "\n" + fs.readFileSync(new URL("../render.js", import.meta.url), "utf8");
 const grab = (re) => src.match(re)[0];
 const code = [
   grab(/  function fmtTime\([\s\S]*?\n  }\n/), grab(/  function parseTime\([\s\S]*?\n  }\n/),
