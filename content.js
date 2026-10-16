@@ -454,6 +454,26 @@ RULES
     return `**Error:** ${e?.message || e}`;
   }
 
+  // ---------- Icons ----------
+  // Inline SVG (24px grid, stroked, currentColor) so they follow the theme. Static strings only.
+  const ICONS = {
+    chat: '<path d="M4 5h16v11H9l-5 4z"/>',
+    notes: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 12h7M9 16h5"/>',
+    cards: '<rect x="3" y="7" width="14" height="12" rx="2"/><path d="M7 7V5h14v12h-4"/>',
+    quiz: '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/>',
+    review: '<path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4"/><path d="M12 8v4l3 2"/>',
+    trash: '<path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/>',
+    gear: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+    send: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+    chevron: '<path d="M6 9l6 6 6-6"/>',
+    spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>'
+  };
+  function icon(name, size = 18) {
+    const span = el("span", { class: "yta-ico", "aria-hidden": "true" });
+    span.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
+    return span;
+  }
+
   // ---------- Rendering ----------
 
   function renderMarkdown(md) {
@@ -510,7 +530,7 @@ RULES
 
   function fillAssistant(msg, content, { streaming = false, cards = null, quiz = null } = {}) {
     msg.classList.remove("yta-pending");
-    msg.replaceChildren(quiz ? renderQuiz(quiz) : renderMarkdown(content));
+    msg.replaceChildren(quiz ? renderQuiz(quiz) : cards ? renderCards(cards) : renderMarkdown(content));
     if (streaming) return;
     if (cards) {
       msg.append(el("div", { class: "yta-card-actions" },
@@ -541,25 +561,31 @@ RULES
 
   // ---------- Panel ----------
 
+  // id, tab label, icon, intro title, intro text, action button label
   const MODES = [
-    ["chat", "Chat", "Ask anything about the video below."],
-    ["notes", "Notes", "Study notes you can review instead of rewatching."],
-    ["cards", "Flashcards", "Added to your daily review; send them to Quizlet or Anki too."],
-    ["quiz", "Quiz", "Check what you understood; wrong answers link to the part to rewatch."]
+    ["chat", "Chat", "chat", "Ask me anything about this video", "I'll answer from the video and point you to the exact moment. Try one of these:"],
+    ["notes", "Notes", "notes", "Study notes in seconds", "The key ideas, terms and examples, so you can review without rewatching.", "Make study notes"],
+    ["cards", "Flashcards", "cards", "Turn this video into flashcards", "They go into your daily review automatically, and you can send them to Quizlet or Anki.", "Make flashcards"],
+    ["quiz", "Quiz", "quiz", "Check what stuck", "A quick multiple-choice quiz. Miss one and I'll show you the part to rewatch.", "Start the quiz"]
   ];
+  const SUGGESTIONS = ["Explain the main idea simply", "What should I remember from this?", "Give me an example I can relate to"];
 
   function buildPanel() {
     const panel = el("div", { id: PANEL_ID });
 
+    const logo = el("span", { class: "yta-logo" });
+    logo.append(icon("chat", 15));
     const header = el("div", { class: "yta-header" },
-      el("div", { class: "yta-brand" }, el("span", { class: "yta-logo", text: "▶" }), el("span", { text: "Study Pal" })),
-      el("span", { id: "yta-status", class: "yta-status" }),
+      el("div", { class: "yta-brand" }, logo,
+        el("div", { class: "yta-titles" },
+          el("span", { class: "yta-name", text: "Study Pal" }),
+          el("span", { id: "yta-status", class: "yta-status", "aria-live": "polite" }))),
       el("div", { class: "yta-header-actions" },
         el("button", { class: "yta-review-btn", id: "yta-review", title: "Review the flashcards that are due today", onclick: startReview },
-          "Review", el("span", { class: "yta-badge", id: "yta-due" })),
-        el("button", { class: "yta-icon", title: "Clear this video's chat", text: "🗑", onclick: clearHistory }),
-        el("button", { class: "yta-icon", title: "Settings", text: "⚙", onclick: () => alive() && chrome.runtime.sendMessage({ type: "openOptions" }) }),
-        el("button", { class: "yta-icon", id: "yta-toggle", title: "Expand / collapse", text: "▾", onclick: () => panel.classList.toggle("yta-collapsed") })
+          icon("review", 16), el("span", { text: "Review" }), el("span", { class: "yta-badge", id: "yta-due", hidden: "" })),
+        el("button", { class: "yta-icon", title: "Clear this video's chat", "aria-label": "Clear this video's chat", onclick: clearHistory }, icon("trash")),
+        el("button", { class: "yta-icon", title: "Settings", "aria-label": "Settings", onclick: () => alive() && chrome.runtime.sendMessage({ type: "openOptions" }) }, icon("gear")),
+        el("button", { class: "yta-icon", id: "yta-toggle", title: "Expand / collapse", "aria-label": "Expand or collapse", onclick: () => panel.classList.toggle("yta-collapsed") }, icon("chevron"))
       )
     );
     header.addEventListener("click", (e) => {
@@ -568,14 +594,13 @@ RULES
     });
 
     const tabs = el("div", { class: "yta-tabs", role: "tablist" });
-    for (const [id, label] of MODES) {
-      tabs.append(el("button", { class: "yta-tab", "data-mode": id, onclick: () => setMode(id) },
-        el("span", { class: "yta-tab-label", text: label })));
+    for (const [id, label, ico] of MODES) {
+      tabs.append(el("button", { class: "yta-tab", role: "tab", "data-mode": id, onclick: () => setMode(id) }, icon(ico, 16), el("span", { text: label })));
     }
 
     const form = el("div", { class: "yta-form" });
     form.append(
-      el("div", { class: "yta-fields yta-row", "data-mode": "cards" },
+      el("div", { class: "yta-fields", "data-mode": "cards" },
         el("select", { id: "yta-card-count", "aria-label": "Number of flashcards" },
           el("option", { value: "10", text: "10 cards" }),
           el("option", { value: "20", text: "20 cards", selected: "" }),
@@ -587,22 +612,30 @@ RULES
         el("select", { id: "yta-quiz-count", "aria-label": "Number of questions" },
           el("option", { value: "5", text: "5 questions" }),
           el("option", { value: "10", text: "10 questions" }))),
-      el("div", { class: "yta-actions" },
-        el("button", { id: "yta-run", class: "yta-primary", text: "Go", onclick: runMode }),
-        el("span", { class: "yta-hint", id: "yta-hint" })),
+      el("button", { id: "yta-run", class: "yta-primary yta-go", onclick: runMode }, icon("spark", 16), el("span", { id: "yta-run-label" })),
       el("p", { class: "yta-notice", id: "yta-notice" })
     );
 
-    const thread = el("div", { id: "yta-thread", class: "yta-thread" });
+    const thread = el("div", { id: "yta-thread", class: "yta-thread", "aria-live": "polite" });
+
+    // Shown while this video's thread is empty: what the tab does (and, on Chat, questions to start with).
+    const intro = el("div", { class: "yta-intro", id: "yta-intro" },
+      el("p", { class: "yta-intro-title", id: "yta-intro-title" }),
+      el("p", { class: "yta-intro-text", id: "yta-intro-text" }),
+      el("div", { class: "yta-chips", id: "yta-chips" },
+        ...SUGGESTIONS.map((q) => el("button", { class: "yta-chip", text: q, onclick: () => {
+          $("#yta-followup-input").value = q;
+          sendFollowup();
+        } }))));
 
     // The chat box: the main input on the Chat tab, and for follow-ups everywhere else.
     const chatBox = el("div", { class: "yta-followup" },
-      el("input", { id: "yta-followup-input", placeholder: "Ask anything about this video..." }),
-      el("button", { class: "yta-primary", text: "Send", onclick: sendFollowup })
+      el("input", { id: "yta-followup-input", placeholder: "Ask anything about this video...", "aria-label": "Ask a question about this video" }),
+      el("button", { class: "yta-send", "aria-label": "Send", title: "Send", onclick: sendFollowup }, icon("send", 18))
     );
     chatBox.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); sendFollowup(); } });
 
-    const body = el("div", { class: "yta-body" }, tabs, form, thread, chatBox);
+    const body = el("div", { class: "yta-body" }, tabs, form, thread, intro, chatBox);
     panel.append(header, body);
     return panel;
   }
@@ -611,21 +644,28 @@ RULES
     state.mode = mode;
     const panel = $("#yta-panel");
     panel.dataset.mode = mode;
-    document.querySelectorAll("#yta-panel .yta-tab").forEach((t) => t.classList.toggle("yta-active", t.dataset.mode === mode));
+    document.querySelectorAll("#yta-panel .yta-tab").forEach((t) => {
+      t.classList.toggle("yta-active", t.dataset.mode === mode);
+      t.setAttribute("aria-selected", String(t.dataset.mode === mode));
+    });
     document.querySelectorAll("#yta-panel .yta-fields").forEach((f) => f.classList.toggle("yta-show", f.dataset.mode === mode));
-    $("#yta-hint").textContent = MODES.find(([id]) => id === mode)[2];
+    const [, , , title, text, action] = MODES.find(([id]) => id === mode);
+    $("#yta-intro-title").textContent = title;
+    $("#yta-intro-text").textContent = text;
+    $("#yta-run-label").textContent = action || "";
+    $("#yta-followup-input").placeholder = mode === "chat" ? "Ask anything about this video..." : "Ask a follow-up...";
     if (mode === "chat" && !panel.classList.contains("yta-collapsed")) $("#yta-followup-input").focus();
   }
 
   async function ensureContext() {
     if (state.ctx) return state.ctx;
     if (state.ctxPromise) return state.ctxPromise;
-    setStatus("Reading transcript...", "yta-busy");
+    setStatus("Reading captions", "yta-busy");
     state.ctxPromise = loadVideoContext(state.videoId).then((ctx) => {
       const notice = $("#yta-notice");
       if (ctx.transcript) {
         state.ctx = ctx;
-        setStatus(`Transcript loaded${ctx.transcriptLang ? " (" + ctx.transcriptLang + ")" : ""}`, "yta-ok");
+        setStatus("Captions ready", "yta-ok");
         if (notice) notice.textContent = ctx.fromDub
           ? `This video has no captions in its original language, so Study Pal is reading the ${ctx.transcriptLang} captions of a dubbed version.`
           : "";
@@ -734,14 +774,14 @@ RULES
         saveHistory();
         if (cards) {
           const added = await addToDeck(items);
-          setStatus(`${items.length} flashcards ready${added ? ` · ${added} added to your daily review` : ""}`, "yta-ok");
+          setStatus(added ? `${added} cards added to review` : `${items.length} flashcards ready`, "yta-ok");
         } else setStatus("Quiz ready", "yta-ok");
         return;
       }
       state.messages.push({ role: "assistant", content: res.text });
       fillAssistant(pending, res.text);
       saveHistory();
-      setStatus(builtin ? "Chrome built-in AI · on-device" : `${configured.provider} · ${configured.model}`, "yta-ok");
+      setStatus(builtin ? "On-device AI" : configured.model, "yta-ok");
     } catch (e) {
       pending.remove();
       addMessage("assistant", builtinError(e));
@@ -869,6 +909,30 @@ RULES
       `${i + 1}. ${q.question} Answer: ${q.choices[q.answer]}.${q.explanation ? ` ${q.explanation}` : ""}`)].join("\n");
   }
 
+  // Flashcards as cards you can flip (click or Enter/Space): question on the front, answer on the back.
+  function renderCards(cards) {
+    const wrap = el("div", { class: "yta-deck" },
+      el("p", { class: "yta-deck-title" }, el("strong", { text: `${cards.length} flashcards` }), " · tap a card to flip it"));
+    for (const c of cards) {
+      const back = el("span", { class: "yta-flip-back" }, el("span", { text: c.back }));
+      if (c.t != null) {
+        back.append(el("a", { class: "yta-ts", href: "#", text: fmtTime(c.t),
+          onclick: (e) => { e.preventDefault(); e.stopPropagation(); seekTo(c.t); } }));
+      }
+      const card = el("div", { class: "yta-flip", role: "button", tabindex: "0", "aria-pressed": "false",
+        "aria-label": `Flashcard: ${c.front}. Press to show the answer.` },
+        el("span", { class: "yta-flip-front", text: c.front }), back);
+      const flip = () => {
+        const on = card.classList.toggle("yta-flipped");
+        card.setAttribute("aria-pressed", String(on));
+      };
+      card.addEventListener("click", flip);
+      card.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); flip(); } });
+      wrap.append(card);
+    }
+    return wrap;
+  }
+
   function renderQuiz(quiz) {
     const box = el("div", { class: "yta-quiz" });
     const score = el("p", { class: "yta-quiz-score", "aria-live": "polite" });
@@ -876,8 +940,9 @@ RULES
     quiz.forEach((q, qi) => {
       const feedback = el("div", { class: "yta-quiz-feedback", "aria-live": "polite" });
       const item = el("div", { class: "yta-quiz-q" },
-        el("p", { class: "yta-quiz-text" }, el("strong", { text: `${qi + 1}. ` }), q.question));
-      const choices = q.choices.map((c, ci) => el("button", { class: "yta-choice", text: c, onclick: () => {
+        el("p", { class: "yta-quiz-count", text: `Question ${qi + 1} of ${quiz.length}` }),
+        el("p", { class: "yta-quiz-text", text: q.question }));
+      const choices = q.choices.map((c, ci) => el("button", { class: "yta-choice", onclick: () => {
         if (item.dataset.done) return;
         item.dataset.done = "1";
         const right = ci === q.answer;
@@ -892,8 +957,13 @@ RULES
         if (!right && q.t != null) {
           feedback.append(el("button", { class: "yta-secondary", text: `▶ Rewatch from ${fmtTime(q.t)}`, onclick: () => seekTo(q.t) }));
         }
-        if (answered === quiz.length) score.textContent = `Score: ${correct} / ${quiz.length}`;
-      } }));
+        if (answered === quiz.length) {
+          score.textContent = `${correct} / ${quiz.length} correct. ${correct === quiz.length ? "Perfect, you've got this video down."
+            : correct >= quiz.length / 2 ? "Nice work. Rewatch the parts you missed, then try again."
+            : "Worth another look: rewatch the parts linked above, then retake the quiz."}`;
+          score.classList.toggle("yta-perfect", correct === quiz.length);
+        }
+      } }, el("span", { class: "yta-letter", text: String.fromCharCode(65 + ci) }), el("span", { text: c })));
       item.append(el("div", { class: "yta-choices" }, ...choices), feedback);
       box.append(item);
     });
@@ -973,8 +1043,9 @@ RULES
       const card = queue.shift();
       if (!card) {
         box.append(
-          el("p", { text: total
-            ? `All done for today: ${total} card${total === 1 ? "" : "s"} reviewed.`
+          el("div", { class: "yta-review-head" }, icon("review", 16), el("strong", { text: "Daily review" })),
+          el("p", { class: "yta-review-done", text: total
+            ? `All done for today: ${total} card${total === 1 ? "" : "s"} reviewed. See you tomorrow.`
             : "Nothing to review right now. Make flashcards on any video and they'll show up here when they're due." }),
           el("button", { class: "yta-secondary", text: "Close", onclick: () => box.remove() }));
         return;
@@ -984,8 +1055,9 @@ RULES
           ? el("button", { class: "yta-mini", text: `▶ ${fmtTime(card.t)} in this video`, onclick: () => seekTo(card.t) })
           : el("a", { class: "yta-mini", href: `https://www.youtube.com/watch?v=${card.videoId}&t=${Math.floor(card.t)}s`,
               target: "_blank", rel: "noopener", text: `▶ ${fmtTime(card.t)} in the video` });
-      const grades = [["again", "Again"], ["good", "Good"], ["easy", "Easy"]].map(([g, text]) => el("button", {
-        class: g === "good" ? "yta-primary" : "yta-secondary", text,
+      const gap = (g) => { const d = schedule(card, g).interval; return `${d} day${d === 1 ? "" : "s"}`; };
+      const grades = [["again", "Again", "10 min"], ["good", "Good", gap("good")], ["easy", "Easy", gap("easy")]].map(([g, text, when]) => el("button", {
+        class: `yta-grade yta-grade-${g}`,
         onclick: async () => {
           const deck = await loadDeck();
           const i = deck.findIndex((c) => c.id === card.id);
@@ -995,11 +1067,15 @@ RULES
           else done++;
           show();
         }
-      }));
+      }, el("span", { text }), el("small", { text: when })));
       const answer = el("div", { class: "yta-review-answer", hidden: "" },
         el("p", { text: card.back }), jump, el("div", { class: "yta-grades" }, ...grades));
+      const bar = el("div", { class: "yta-progress", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": String(total), "aria-valuenow": String(done) },
+        el("span", { style: `width:${Math.round((done / total) * 100)}%` }));
       box.append(
-        el("p", { class: "yta-review-meta", text: `Card ${done + 1} of ${total} · ${card.videoTitle || "a video"}` }),
+        el("div", { class: "yta-review-head" }, icon("review", 16), el("strong", { text: "Daily review" }), el("span", { text: `${done + 1} of ${total}` })),
+        bar,
+        el("p", { class: "yta-review-meta", text: `From: ${card.videoTitle || "a video"}` }),
         el("p", { class: "yta-review-front", text: card.front }),
         el("button", { class: "yta-primary", text: "Show answer", onclick: (e) => { e.currentTarget.remove(); answer.hidden = false; } }),
         answer);

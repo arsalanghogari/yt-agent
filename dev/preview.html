@@ -1,0 +1,135 @@
+<!doctype html>
+<!--
+  Design preview for the Study Pal panel: runs the real content.js and panel.css beside a stand-in
+  YouTube player, with fake extension APIs and canned AI replies. Not shipped in the extension.
+  Serve the repo root (e.g. `python3 -m http.server 8765`) and open /dev/preview.html.
+  Query options: ?dark (YouTube dark theme), ?empty (no saved chat), ?due=N (cards due in review), ?solo (panel only).
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Study Pal preview</title>
+<link rel="stylesheet" href="../panel.css">
+<style>
+  body { margin: 0; background: #fff; font-family: Roboto, Arial, sans-serif; }
+  html[dark] body { background: #0f0f0f; color: #f1f1f1; }
+  ytd-watch-flexy { display: flex; gap: 24px; padding: 24px; align-items: flex-start; }
+  #primary { flex: 1; min-width: 0; max-width: 860px; }
+  #movie_player { aspect-ratio: 16 / 9; background: #111; border-radius: 12px; display: grid; place-items: center; color: #777; font-size: 14px; }
+  #movie_player video { display: none; }
+  #below h1 { font-size: 20px; margin: 12px 0; }
+  #secondary { width: 402px; flex: none; }
+</style>
+<script>
+  const params = new URLSearchParams(location.search);
+  if (params.has("dark")) document.documentElement.setAttribute("dark", "");
+  history.replaceState({}, "", "/watch?v=prevVideo01&" + params.toString());
+
+  const VIDEO = "prevVideo01";
+  const DAY = 864e5;
+  const store = {
+    provider: "openai", apiKey: "k", model: "preview",
+    studyDeck: Array.from({ length: 9 }, (_, i) => ({
+      id: "c" + i, videoId: i < 6 ? VIDEO : "otherVideo1", videoTitle: i < 6 ? "How CRISPR works" : "Intro to genetics",
+      front: ["Cas9", "Guide RNA", "Gene drive", "Ex vivo therapy", "Germline editing", "Functional cure", "Allele", "Genotype", "Phenotype"][i],
+      back: "A short explanation of the idea, as the video gives it.", t: 60 * (i + 1), due: Date.now() + (i < Number(params.get("due") ?? 4) ? -DAY : DAY),
+      interval: 1, ease: 2.5, reps: 1
+    }))
+  };
+  if (!params.has("empty")) {
+    store["chat:" + VIDEO] = [
+      { role: "user", content: "What does Cas9 actually do?", label: "What does Cas9 actually do?" },
+      { role: "assistant", content: "**Cas9 is an enzyme that cuts DNA** at a precise spot [3:36].\n\nThink of it as molecular scissors: a **guide RNA** carries a 20-letter address, and Cas9 only cuts where the DNA matches that address [3:52].\n\n- After the cut, the cell repairs the break, which is when edits happen [4:20].\n- That's why CRISPR is described as a *word processor* for DNA [1:39].\n\n*Not from the video:* Cas9 was first found in bacteria, where it fights viruses." }
+    ];
+  }
+
+  const replies = {
+    chat: "Good question. **A gene drive** makes one version of a gene get inherited far more often than the usual 50% [19:47], so it spreads through a population over a few generations.\n\n- It could wipe out malaria by spreading infertility genes in mosquitoes [20:10].\n- The risk: once released, it's hard to recall [20:45].",
+    notes: "## Overview\nCRISPR is a tool for editing DNA precisely. The video explains how it works, what it's used for today, and the ethical questions it raises.\n\n## Key ideas\n- **Cas9 cuts DNA** at a spot chosen by a guide RNA [3:36].\n- **Therapies today work outside the body**: cells are edited, then returned to the patient [6:39].\n- **Gene drives** can spread an edit through a whole species [19:47].\n\n## Key terms\n- **Cas9**: the enzyme that cuts DNA.\n- **Guide RNA**: the RNA that tells Cas9 where to cut.\n\n## Remember\n1. CRISPR = find (guide RNA) + cut (Cas9).\n2. Cost comes from processing cells outside the body.",
+    cards: JSON.stringify([
+      { front: "What does Cas9 do?", back: "It's an enzyme that cuts DNA at the spot a guide RNA points it to.", time: "3:36" },
+      { front: "Why is the sickle cell therapy so expensive?", back: "Cells are edited outside the body and the patient needs a hospital stay, which costs around $2 million.", time: "6:39" },
+      { front: "What is a gene drive?", back: "A way to make one version of a gene get inherited far more often, so it spreads through a population.", time: "19:47" }
+    ]),
+    quiz: JSON.stringify([
+      { question: "What tells Cas9 where to cut?", choices: ["A guide RNA", "A protein tag", "The cell's ribosome", "A DNA primer"], answer: 0, explanation: "The guide RNA carries the address of the target sequence.", time: "3:52" },
+      { question: "Why do current CRISPR therapies cost so much?", choices: ["Cells are edited outside the body", "Cas9 is rare", "Patents only", "It needs gene drives"], answer: 0, explanation: "Ex vivo processing plus hospital stays drive the cost.", time: "6:39" },
+      { question: "What makes gene drives risky?", choices: ["They're hard to recall once released", "They only work in labs", "They cut RNA", "They're too slow"], answer: 0, explanation: "A drive spreads on its own through a population.", time: "20:45" }
+    ])
+  };
+  const replyFor = (msgs) => {
+    const q = msgs.at(-1).content;
+    return /study notes/.test(q) ? replies.notes : /flashcards/.test(q) ? replies.cards : /multiple-choice quiz/.test(q) ? replies.quiz : replies.chat;
+  };
+
+  const changeListeners = [];
+  window.chrome = {
+    runtime: {
+      id: "preview",
+      sendMessage: async (m) => (m.type === "isConfigured" ? { ok: true, provider: "openai", model: "preview" } : { ok: true }),
+      connect: () => {
+        const ls = [];
+        return {
+          onMessage: { addListener: (f) => ls.push(f) }, onDisconnect: { addListener() {} }, disconnect() {},
+          postMessage({ messages }) {
+            const text = replyFor(messages);
+            let i = 0;
+            const tick = () => {
+              const from = i;
+              i = Math.min(text.length, i + 24);
+              ls.forEach((f) => f({ delta: text.slice(from, i) }));
+              if (i < text.length) setTimeout(tick, 30); else ls.forEach((f) => f({ done: true, text }));
+            };
+            setTimeout(tick, 600);
+          }
+        };
+      }
+    },
+    storage: {
+      local: {
+        get: async (keys) => {
+          const ks = typeof keys === "string" ? [keys] : Array.isArray(keys) ? keys : Object.keys(store);
+          return Object.fromEntries(ks.filter((k) => k in store).map((k) => [k, structuredClone(store[k])]));
+        },
+        set: async (obj) => {
+          const changes = {};
+          for (const [k, v] of Object.entries(obj)) { store[k] = structuredClone(v); changes[k] = { newValue: v }; }
+          changeListeners.forEach((f) => f(changes));
+        },
+        remove: async (k) => { delete store[k]; }
+      },
+      onChanged: { addListener: (f) => changeListeners.push(f) }
+    }
+  };
+
+  // Fake YouTube: the watch page (one English caption track) and its captions.
+  const realFetch = window.fetch;
+  window.fetch = async (url, opts) => {
+    if (!String(url).includes("youtube.com")) return realFetch(url, opts);
+    const player = { videoDetails: { title: "How CRISPR works", author: "Science Lab", lengthSeconds: "1980", shortDescription: "", keywords: [] },
+      captions: { playerCaptionsTracklistRenderer: { captionTracks: [{ baseUrl: "https://www.youtube.com/api/timedtext?v=prevVideo01&lang=en", languageCode: "en", name: { simpleText: "English" } }] } } };
+    const captions = { events: [{ tStartMs: 0, segs: [{ utf8: "CRISPR lets us edit DNA." }] }, { tStartMs: 216000, segs: [{ utf8: "Cas9 cuts DNA." }] }] };
+    return new Response(String(url).includes("timedtext") ? JSON.stringify(captions) : `<script>var ytInitialPlayerResponse = ${JSON.stringify(player)};var meta=1;<\/script>`);
+  };
+  navigator.clipboard.writeText = async () => {};
+</script>
+</head>
+<body>
+  <ytd-watch-flexy>
+    <div id="primary">
+      <div id="movie_player"><video></video>Video player</div>
+      <div id="below"><h1>How CRISPR works</h1></div>
+    </div>
+    <div id="secondary"><div id="secondary-inner"></div></div>
+  </ytd-watch-flexy>
+  <script>
+    // ?solo: just the panel at sidebar width (no player), for looking at the design up close.
+    if (params.has("solo")) {
+      document.querySelector("ytd-watch-flexy").setAttribute("theater", "");
+      document.getElementById("primary").style.display = "none";
+    }
+  </script>
+  <script src="../content.js"></script>
+</body>
+</html>
