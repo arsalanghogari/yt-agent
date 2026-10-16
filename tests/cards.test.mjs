@@ -34,4 +34,18 @@ assert.match(md, /^\*\*3 flashcards\*\*/);
 assert.match(md, /1\. \*\*Spaced repetition\*\*: Reviewing .* \[4:32\]/);
 assert.equal(parseCards("Sorry, I can't.", 10).length, 0);
 assert.equal(parseCards('{"front":"x","back":"y"}', 10).length, 0);
+
+// timestamps and links the model writes into the text are removed (the time is kept separately)
+const dup = parseCards(JSON.stringify([
+  { front: "What is Cas9?", back: "An enzyme that cuts DNA where guide RNA points it [3:36]. [3:36](https://www.youtube.com/watch?v=x#)", time: "3:36" },
+  { front: "What is CRISPR? (1:19)", back: "A technology for altering DNA (1:19).", time: "1:19" }
+]), 10, 3600);
+assert.equal(dup[0].back, "A technology for altering DNA.", "sorted into video order, timestamps stripped");
+assert.equal(dup[0].front, "What is CRISPR?");
+assert.equal(dup[1].back, "An enzyme that cuts DNA where guide RNA points it.", "markdown timestamp links stripped");
+assert.deepEqual(dup.map((c) => c.t), [79, 216]);
+assert.ok(!/\d:\d\d/.test(cardsAsText(dup).replace(/\(video at [^)]*\)/g, "")), "only the one link-back time remains in the export");
+// longer, specific answers are kept whole (no length cap in code)
+const longBack = "x ".repeat(60).trim();
+assert.equal(parseCards(JSON.stringify([{ front: "Q?", back: longBack }]), 5)[0].back, longBack);
 console.log("flashcard checks passed");

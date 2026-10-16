@@ -341,9 +341,12 @@ RULES
         ? "a question on the front and its answer on the back"
         : "a key term or concept on the front and its definition or explanation on the back";
       return [
-        `Make ${fields.cardCount} flashcards for studying what this video teaches, with ${style}.`,
-        "Cover the most important, testable ideas across the whole video, not just the start. One idea per card. Fronts under 12 words, backs under 30 words. Each card must make sense without the video. No trivia about the presenter, the channel or sponsors.",
-        "For each card give the timestamp where that idea is explained.",
+        `Make up to ${fields.cardCount} flashcards for studying what this video teaches, with ${style}.`,
+        "Cover the most important, testable ideas across the whole video, not just the start. Fewer, better cards beat padding: never make two cards that test the same fact.",
+        "Front: a clear, grammatical question or term with exactly one right answer, specific enough that it can't be answered with a generic statement.",
+        "Back: the actual answer as the video explains it, in 1 to 3 sentences (up to about 50 words). Include the specifics the video gives, such as how or why it works, numbers, names, examples and comparisons, so the card teaches something rather than restating the question. Use only what the video says.",
+        "Each card must make sense without the video. No trivia about the presenter, the channel or sponsors. Do not put timestamps or links in the card text.",
+        "For each card give, separately, the timestamp where that idea is explained.",
         'Reply with only a JSON array and no other text, like: [{"front":"Spaced repetition","back":"Reviewing material at increasing intervals so it moves into long-term memory.","time":"4:32"}]'
       ].join("\n");
     }
@@ -1034,14 +1037,17 @@ RULES
     const seen = new Set();
     const cards = [];
     for (const r of raw) {
-      const front = clean(r?.front ?? r?.term ?? r?.question), back = clean(r?.back ?? r?.definition ?? r?.answer);
+      // Timestamps belong in `time`; models sometimes also write them (or links) into the text.
+      const strip = (v) => clean(v).replace(/\[?\(?\d{1,2}:\d{2}(?::\d{2})?\)?\]?(\(https?:[^)]*\))?/g, "").replace(/\s+([.,;:!?])/g, "$1").replace(/\s{2,}/g, " ").trim();
+      const front = strip(r?.front ?? r?.term ?? r?.question), back = strip(r?.back ?? r?.definition ?? r?.answer);
       if (!front || !back || seen.has(front.toLowerCase())) continue;
       seen.add(front.toLowerCase());
       const t = toSeconds(r?.time);
       cards.push({ front, back, ...(Number.isFinite(t) && t >= 0 && t < dur ? { t } : {}) });
       if (cards.length >= max) break;
     }
-    return cards;
+    // In video order, so studying follows the video (cards without a time keep their place at the end).
+    return cards.sort((a, b) => (a.t ?? Infinity) - (b.t ?? Infinity));
   }
 
   function cardsMarkdown(cards) {
