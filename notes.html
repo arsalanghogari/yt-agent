@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Study notes</title>
+<style>
+  :root {
+    --ink: #111114;
+    --ink-2: #3b3b40;
+    --muted: #5d5d63;
+    --line: #e4e4e8;
+    --accent: #e62117;
+    --link: #065fd4;
+    --link-soft: rgba(6, 95, 212, .09);
+  }
+  * { box-sizing: border-box; }
+  html { background: #ececef; }
+  body {
+    margin: 0; color: var(--ink); font: 15px/1.6 "Roboto", "Helvetica Neue", Arial, sans-serif;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+
+  /* Toolbar (screen only) */
+  .bar {
+    position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 12px;
+    padding: 12px 20px; background: #fff; border-bottom: 1px solid var(--line);
+  }
+  .bar p { margin: 0; flex: 1; color: var(--muted); font-size: 13.5px; }
+  .bar button {
+    height: 36px; padding: 0 18px; border: 0; border-radius: 18px; background: var(--accent); color: #fff;
+    font: 600 14px/1 inherit; font-family: inherit; cursor: pointer;
+  }
+  .bar button:hover { background: #c91a11; }
+  .bar button:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+
+  /* The page */
+  .sheet {
+    max-width: 760px; margin: 28px auto 64px; padding: 56px 64px 64px;
+    background: #fff; border-radius: 4px; box-shadow: 0 1px 3px rgba(0, 0, 0, .12);
+  }
+  header { padding-bottom: 20px; margin-bottom: 28px; border-bottom: 2px solid var(--ink); }
+  .kind { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; color: var(--accent); font-weight: 700; font-size: 13px; }
+  .kind span {
+    display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: var(--accent);
+  }
+  h1 { margin: 0 0 8px; font-size: 26px; line-height: 1.25; letter-spacing: -.015em; text-wrap: balance; }
+  .meta { margin: 0; color: var(--muted); font-size: 13px; }
+  .meta a { color: var(--link); text-decoration: none; }
+
+  main { max-width: 68ch; }
+  main h3, main h4 {
+    margin: 30px 0 10px; font-size: 17px; line-height: 1.3; letter-spacing: -.005em;
+    break-after: avoid; page-break-after: avoid;
+  }
+  main h3:first-child, main h4:first-child { margin-top: 0; }
+  main p { margin: 0 0 12px; color: var(--ink-2); }
+  main ul, main ol { margin: 0 0 14px; padding-left: 22px; color: var(--ink-2); }
+  main li { margin: 6px 0; break-inside: avoid; page-break-inside: avoid; }
+  main li::marker { color: var(--muted); }
+  main strong { color: var(--ink); font-weight: 650; }
+  main a[href*="youtube.com/watch"] {
+    padding: 0 6px; border-radius: 9px; background: var(--link-soft); color: var(--link);
+    font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; text-decoration: none; white-space: nowrap;
+  }
+  main code { font: 13px ui-monospace, Menlo, monospace; background: #f1f1f4; padding: 1px 5px; border-radius: 4px; }
+  footer { margin-top: 40px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+  .empty { text-align: center; color: var(--muted); }
+
+  @media print {
+    @page { margin: 18mm 16mm; }
+    html, body { background: #fff; }
+    .bar { display: none; }
+    .sheet { max-width: none; margin: 0; padding: 0; box-shadow: none; }
+  }
+  @media (max-width: 820px) {
+    .sheet { margin: 0; padding: 32px 22px 40px; border-radius: 0; box-shadow: none; }
+  }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <p>In the print window, set <strong>Destination</strong> to <strong>Save as PDF</strong>.</p>
+    <button id="print" type="button">Save as PDF</button>
+  </div>
+  <article class="sheet">
+    <header>
+      <p class="kind"><span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 12h7M9 16h5"/></svg></span>Study notes</p>
+      <h1 id="title">Study notes</h1>
+      <p class="meta" id="meta"></p>
+    </header>
+    <main id="notes"><p class="empty">No notes to show. Make study notes on a video first.</p></main>
+    <footer id="footer">Made with Study Pal for YouTube.</footer>
+  </article>
+  <script src="notes.js"></script>
+</body>
+</html>

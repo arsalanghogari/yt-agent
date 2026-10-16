@@ -3,7 +3,7 @@
 A study companion in a panel next to the YouTube player, for learning from the video you have open:
 
 1. **Chat**: ask anything about the video, like a tutor would answer it. Answers are grounded in the video, with clickable timestamps.
-2. **Notes**: study notes to review instead of rewatching: overview, key ideas, key terms, examples, and what to remember.
+2. **Notes**: study notes to review instead of rewatching: overview, key ideas, key terms, examples, and what to remember. **Save as PDF** opens a print-ready page with clickable timestamps; choose Save as PDF in the print window.
 3. **Flashcards**: 10–30 cards (term → definition or question → answer), each linking back to the moment it's explained. They're added to your daily review automatically. **Send to Quizlet** fills in a new Quizlet set in your browser for you to check and create (Quizlet has no public API; if its page has changed, the cards are on your clipboard to paste into its Import box). **Download for Anki** saves a file Anki imports directly.
 4. **Quiz**: a multiple-choice quiz on what the video teaches. Wrong answers show why, with a link to rewatch the part that covers it.
 5. **Daily review**: flashcards from every video you've studied, shown when they're due (spaced repetition: Again / Good / Easy). The **Review** button shows how many are due.
@@ -67,6 +67,7 @@ manifest.json     MV3 manifest
 background.js     provider adapters + message routing
 content.js        transcript fetch, panel UI, prompts
 quizlet.js        fills in Quizlet's create-set page with flashcards from the panel
+notes.html/js     print-ready study notes page (Save as PDF)
 panel.css         panel styles (light + dark)
 options.html/js   settings page
 icons/            toolbar icons

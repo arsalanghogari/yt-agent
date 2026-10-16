@@ -519,14 +519,14 @@ RULES
     return wrap;
   }
 
-  function addMessage(role, content, { pending = false, cards = null, quiz = null } = {}) {
+  function addMessage(role, content, { pending = false, cards = null, quiz = null, notes = false } = {}) {
     const thread = $("#yta-thread");
     const msg = el("div", { class: `yta-msg yta-${role}` });
     if (pending) {
       msg.classList.add("yta-pending");
       msg.append(el("span", { class: "yta-dots" }, el("i"), el("i"), el("i")));
     } else if (role === "assistant") {
-      fillAssistant(msg, content, { cards, quiz });
+      fillAssistant(msg, content, { cards, quiz, notes });
     } else {
       msg.append(el("p", { text: content }));
     }
@@ -535,10 +535,15 @@ RULES
     return msg;
   }
 
-  function fillAssistant(msg, content, { streaming = false, cards = null, quiz = null } = {}) {
+  function fillAssistant(msg, content, { streaming = false, cards = null, quiz = null, notes = false } = {}) {
     msg.classList.remove("yta-pending");
     msg.replaceChildren(quiz ? renderQuiz(quiz) : cards ? renderCards(cards) : renderMarkdown(content));
     if (streaming) return;
+    if (notes) {
+      msg.append(el("div", { class: "yta-card-actions" },
+        el("button", { class: "yta-primary", title: "Opens a print-ready page; choose Save as PDF", onclick: () => saveNotesPdf(content) },
+          icon("notes", 16), el("span", { text: "Save as PDF" }))));
+    }
     if (cards) {
       msg.append(el("div", { class: "yta-card-actions" },
         el("button", { class: "yta-primary", text: "Send to Quizlet", title: "Opens Quizlet and fills in a new set for you to check and create", onclick: () => sendToQuizlet(cards) }),
@@ -710,7 +715,7 @@ RULES
       : mode === "quiz" ? `Quiz: ${fields.quizCount} questions`
       : `Flashcards: ${fields.cardCount} ${fields.cardStyle === "qa" ? "questions" : "terms"}`;
     await ask(buildTask(mode, fields), label, cfg.language, builtinReady,
-      { cards: mode === "cards" ? fields.cardCount : 0, quiz: mode === "quiz" ? fields.quizCount : 0 });
+      { cards: mode === "cards" ? fields.cardCount : 0, quiz: mode === "quiz" ? fields.quizCount : 0, notes: mode === "notes" });
   }
 
   async function sendFollowup() {
@@ -725,7 +730,7 @@ RULES
     await ask(q, q, cfg.language, builtinReady);
   }
 
-  async function ask(userContent, displayLabel, language, builtinReady, { cards = 0, quiz = 0 } = {}) {
+  async function ask(userContent, displayLabel, language, builtinReady, { cards = 0, quiz = 0, notes = false } = {}) {
     const configured = await chrome.runtime.sendMessage({ type: "isConfigured" });
     if (!configured?.ok) {
       addMessage("assistant", "**No AI is set up.** Click ⚙ and choose Chrome built-in AI (free, no key) or add an API key.");
@@ -789,8 +794,8 @@ RULES
         } else setStatus("Quiz ready", "yta-ok");
         return;
       }
-      state.messages.push({ role: "assistant", content: res.text });
-      fillAssistant(pending, res.text);
+      state.messages.push({ role: "assistant", content: res.text, ...(notes ? { notes: true } : {}) });
+      fillAssistant(pending, res.text, { notes });
       saveHistory();
       setStatus(builtin ? "On-device AI" : configured.model, "yta-ok");
     } catch (e) {
@@ -881,6 +886,23 @@ RULES
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
     setStatus("Downloaded. In Anki: File → Import, choose the file.", "yta-ok");
+  }
+
+  // ---------- Notes PDF ----------
+  // No PDF library: notes.html (an extension page) lays the notes out for print and opens Chrome's print
+  // dialog, where "Save as PDF" makes the file. Timestamps become links to that moment of the video.
+  async function saveNotesPdf(content) {
+    if (!alive()) return;
+    const body = renderMarkdown(content);
+    body.querySelectorAll("a.yta-ts").forEach((a) => {
+      a.href = `https://www.youtube.com/watch?v=${state.videoId}&t=${parseTime(a.dataset.t)}s`;
+      a.removeAttribute("class");
+    });
+    await chrome.storage.local.set({ notesPdf: {
+      title: state.ctx?.title || document.title.replace(/ - YouTube$/, ""), channel: state.ctx?.author || "",
+      url: `https://www.youtube.com/watch?v=${state.videoId}`, html: body.innerHTML, at: Date.now()
+    } });
+    chrome.runtime.sendMessage({ type: "openNotesPdf" });
   }
 
   // ---------- Quiz ----------
@@ -1109,7 +1131,7 @@ RULES
     const saved = (await chrome.storage.local.get(historyKey(videoId)))[historyKey(videoId)];
     if (!saved?.length || state?.videoId !== videoId || state.messages.length) return;
     state.messages = saved;
-    for (const m of saved) addMessage(m.role, m.role === "user" ? m.label || m.content : m.content, { cards: m.cards, quiz: m.quiz });
+    for (const m of saved) addMessage(m.role, m.role === "user" ? m.label || m.content : m.content, { cards: m.cards, quiz: m.quiz, notes: m.notes });
   }
 
   function clearHistory() {
