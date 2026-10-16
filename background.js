@@ -199,6 +199,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     })();
     return true; // keep the channel open for the async response
   }
+  if (msg?.type === "openQuizlet") {
+    chrome.tabs.create({ url: "https://quizlet.com/create-set" });
+    sendResponse({ ok: true });
+    return false;
+  }
   if (msg?.type === "openOptions") {
     chrome.runtime.openOptionsPage();
     sendResponse({ ok: true });

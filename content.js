@@ -336,6 +336,17 @@ RULES
         "Finish with a section called 'The gist' that is one or two sentences I could repeat to a friend."
       ].join("\n");
     }
+    if (mode === "cards") {
+      const style = fields.cardStyle === "qa"
+        ? "a question on the front and its answer on the back"
+        : "a key term or concept on the front and its definition or explanation on the back";
+      return [
+        `Make ${fields.cardCount} flashcards for studying what this video teaches, with ${style}.`,
+        "Cover the most important, testable ideas across the whole video, not just the start. One idea per card. Fronts under 12 words, backs under 30 words. Each card must make sense without the video. No trivia about the presenter, the channel or sponsors.",
+        "For each card give the timestamp where that idea is explained.",
+        'Reply with only a JSON array and no other text, like: [{"front":"Spaced repetition","back":"Reviewing material at increasing intervals so it moves into long-term memory.","time":"4:32"}]'
+      ].join("\n");
+    }
     if (mode === "cut") {
       return [
         `Make a short version of this video, about ${fields.cutMinutes} minutes long, made of its best moments.`,
@@ -541,14 +552,14 @@ RULES
     return wrap;
   }
 
-  function addMessage(role, content, { pending = false, cut = null } = {}) {
+  function addMessage(role, content, { pending = false, cut = null, cards = null } = {}) {
     const thread = $("#yta-thread");
     const msg = el("div", { class: `yta-msg yta-${role}` });
     if (pending) {
       msg.classList.add("yta-pending");
       msg.append(el("span", { class: "yta-dots" }, el("i"), el("i"), el("i")));
     } else if (role === "assistant") {
-      fillAssistant(msg, content, { cut });
+      fillAssistant(msg, content, { cut, cards });
     } else {
       msg.append(el("p", { text: content }));
     }
@@ -557,7 +568,7 @@ RULES
     return msg;
   }
 
-  function fillAssistant(msg, content, { streaming = false, cut = null } = {}) {
+  function fillAssistant(msg, content, { streaming = false, cut = null, cards = null } = {}) {
     msg.classList.remove("yta-pending");
     msg.replaceChildren(renderMarkdown(content));
     if (streaming) return;
@@ -566,6 +577,12 @@ RULES
         onclick: () => (activeCut?.segs === cut ? stopCut("Stopped the short version.") : playCut(cut)) });
       btn.ytaCut = cut;
       msg.append(btn);
+    }
+    if (cards) {
+      msg.append(el("div", { class: "yta-card-actions" },
+        el("button", { class: "yta-primary", text: "Send to Quizlet", title: "Opens Quizlet and fills in a new set for you to check and create", onclick: () => sendToQuizlet(cards) }),
+        el("button", { class: "yta-secondary", text: "Copy for Quizlet", onclick: () => copyForQuizlet(cards) }),
+        el("button", { class: "yta-secondary", text: "Download for Anki", onclick: () => downloadForAnki(cards) })));
     }
     const tools = el("div", { class: "yta-tools" });
     tools.append(el("button", { class: "yta-mini", text: "Copy", onclick: () => navigator.clipboard.writeText(content) }));
@@ -612,7 +629,8 @@ RULES
       ["summarize", "Summarize", "Skip the video, get the info"],
       ["explain", "Explain", "Understand it with your analogies"],
       ["ask", "Ask an expert", "Commentary through a lens you pick"],
-      ["cut", "Watch short", "Play only the key moments"]
+      ["cut", "Watch short", "Play only the key moments"],
+      ["cards", "Flashcards", "Study it in Quizlet or Anki"]
     ];
     for (const [id, label, sub] of modes) {
       tabs.append(el("button", { class: "yta-tab", "data-mode": id, onclick: () => setMode(id) },
@@ -638,6 +656,15 @@ RULES
           el("option", { value: "2", text: "About 2 minutes" }),
           el("option", { value: "5", text: "About 5 minutes", selected: "" }),
           el("option", { value: "10", text: "About 10 minutes" }))),
+      // cards
+      el("div", { class: "yta-fields yta-row", "data-mode": "cards" },
+        el("select", { id: "yta-card-count", "aria-label": "Number of flashcards" },
+          el("option", { value: "10", text: "10 cards" }),
+          el("option", { value: "20", text: "20 cards", selected: "" }),
+          el("option", { value: "30", text: "30 cards" })),
+        el("select", { id: "yta-card-style", "aria-label": "Flashcard style" },
+          el("option", { value: "terms", text: "Term → definition" }),
+          el("option", { value: "qa", text: "Question → answer" }))),
       el("div", { class: "yta-actions" },
         el("button", { id: "yta-run", class: "yta-primary", text: "Go", onclick: runMode }),
         el("span", { class: "yta-hint", id: "yta-hint" })),
@@ -669,6 +696,7 @@ RULES
     hint.textContent = mode === "summarize" ? "Get the info without watching."
       : mode === "explain" ? "Blank = your default framing from settings."
       : mode === "cut" ? "Plays just the key moments, back to back."
+      : mode === "cards" ? "Then send them to Quizlet or Anki."
       : "Blank = your default lens from settings.";
     const input = $(`#yta-panel .yta-fields[data-mode="${mode}"] input`);
     if (input && !$("#yta-panel").classList.contains("yta-collapsed")) input.focus();
@@ -712,14 +740,18 @@ RULES
       framing: $("#yta-framing").value.trim() || cfg.analogyDomain || "",
       persona: $("#yta-persona").value.trim() || cfg.persona || "",
       question: $("#yta-question").value.trim(),
-      cutMinutes: Number($("#yta-cut-len").value) || 5
+      cutMinutes: Number($("#yta-cut-len").value) || 5,
+      cardCount: Number($("#yta-card-count").value) || 20,
+      cardStyle: $("#yta-card-style").value
     };
     const task = buildTask(mode, fields);
     const label = mode === "summarize" ? "Summarize" + (fields.focus ? `: ${fields.focus}` : "")
       : mode === "explain" ? fields.framing ? `Explain: ${fields.framing}` : "Explain simply"
       : mode === "cut" ? `Watch short: about ${fields.cutMinutes} minutes`
+      : mode === "cards" ? `Flashcards: ${fields.cardCount} ${fields.cardStyle === "qa" ? "questions" : "terms"}`
       : `Ask an expert: ${[fields.persona && `As ${fields.persona.replace(/^as\s+/i, "")}`, fields.question].filter(Boolean).join(", ") || "general commentary"}`;
-    await ask(task, label, cfg.language, builtinReady, { cut: mode === "cut" ? fields.cutMinutes : 0 });
+    await ask(task, label, cfg.language, builtinReady,
+      { cut: mode === "cut" ? fields.cutMinutes : 0, cards: mode === "cards" ? fields.cardCount : 0 });
   }
 
   async function sendFollowup() {
@@ -734,7 +766,7 @@ RULES
     await ask(q, q, cfg.language, builtinReady);
   }
 
-  async function ask(userContent, displayLabel, language, builtinReady, { cut = false } = {}) {
+  async function ask(userContent, displayLabel, language, builtinReady, { cut = 0, cards = 0 } = {}) {
     const configured = await chrome.runtime.sendMessage({ type: "isConfigured" });
     if (!configured?.ok) {
       addMessage("assistant", "**No AI is set up.** Click ⚙ and choose Chrome built-in AI (free, no key) or add an API key.");
@@ -748,9 +780,9 @@ RULES
       const builtin = configured.provider === "builtin";
       const builtinOpts = builtin ? await builtinReady : null; // model ready before the slower caption fetch
       const ctx = await ensureContext();
-      if (cut && !ctx.transcript) {
+      if ((cut || cards) && !ctx.transcript) {
         pending.remove();
-        addMessage("assistant", "The short version needs the video's captions, and none could be read for this video.");
+        addMessage("assistant", `${cut ? "The short version" : "Flashcards"} need the video's captions, and none could be read for this video.`);
         return;
       }
       state.messages.push({ role: "user", content: userContent, label: displayLabel });
@@ -758,7 +790,7 @@ RULES
       let frame = 0, latest = "";
       const onDelta = (text) => {
         latest = text;
-        if (cut) return; // the reply is JSON; keep the dots until it's turned into segments
+        if (cut || cards) return; // the reply is JSON; keep the dots until it's turned into segments or cards
         // Re-render at most once per frame; only follow the bottom if the reader is already there.
         frame ||= requestAnimationFrame(() => {
           frame = 0;
@@ -779,6 +811,19 @@ RULES
         if (res?.partial) fillAssistant(pending, res.partial);
         else pending.remove();
         addMessage("assistant", builtin ? res.error : `**Error:** ${res?.error || "unknown"}\n\nCheck your key and model in ⚙ settings.`);
+      } else if (cards) {
+        const set = parseCards(res.text, cards, ctx.lengthSeconds);
+        if (!set.length) {
+          state.messages.pop();
+          pending.remove();
+          addMessage("assistant", "Couldn't read flashcards from the AI's answer. Press Go to try again.");
+        } else {
+          const content = cardsMarkdown(set);
+          state.messages.push({ role: "assistant", content, cards: set });
+          fillAssistant(pending, content, { cards: set });
+          saveHistory();
+          setStatus(`${set.length} flashcards ready`, "yta-ok");
+        }
       } else if (cut) {
         const segs = parseCut(res.text, ctx, cut * 60);
         if (!segs.length) {
@@ -977,6 +1022,74 @@ RULES
     });
   }
 
+  // ---------- Flashcards: Quizlet and Anki ----------
+
+  // Cards from the model's JSON: trimmed, single-line (tabs and line breaks are the import separators),
+  // de-duplicated, capped at the number asked for.
+  function parseCards(text, max, dur = Infinity) {
+    let raw;
+    try { raw = JSON.parse(text.match(/\[[\s\S]*\]/)?.[0]); } catch { return []; }
+    if (!Array.isArray(raw)) return [];
+    const clean = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
+    const seen = new Set();
+    const cards = [];
+    for (const r of raw) {
+      const front = clean(r?.front ?? r?.term ?? r?.question), back = clean(r?.back ?? r?.definition ?? r?.answer);
+      if (!front || !back || seen.has(front.toLowerCase())) continue;
+      seen.add(front.toLowerCase());
+      const t = toSeconds(r?.time);
+      cards.push({ front, back, ...(Number.isFinite(t) && t >= 0 && t < dur ? { t } : {}) });
+      if (cards.length >= max) break;
+    }
+    return cards;
+  }
+
+  function cardsMarkdown(cards) {
+    return [`**${cards.length} flashcards**`, "", ...cards.map((c, i) =>
+      `${i + 1}. **${c.front}**: ${c.back}${c.t != null ? ` [${fmtTime(c.t)}]` : ""}`)].join("\n");
+  }
+
+  // One card per line, term and definition separated by a tab: the default format of Quizlet's import,
+  // and of Anki's text import. Each answer ends with a link back to the moment it's explained.
+  function cardsAsText(cards) {
+    return cards.map((c) => {
+      const link = c.t != null ? ` (video at ${fmtTime(c.t)}: youtu.be/${state.videoId}?t=${Math.floor(c.t)})` : "";
+      return `${c.front}\t${c.back}${link}`;
+    }).join("\n");
+  }
+
+  const setTitle = () => `${state.ctx?.title || document.title.replace(/ - YouTube$/, "")} (flashcards)`.slice(0, 120);
+
+  async function copyForQuizlet(cards) {
+    try {
+      await navigator.clipboard.writeText(cardsAsText(cards));
+      setStatus("Copied. In Quizlet: Create a set, click Import, paste.", "yta-ok");
+    } catch {
+      setStatus("Couldn't copy to the clipboard. Click the panel and try again.", "yta-err");
+    }
+  }
+
+  // Quizlet has no public API for creating sets, so quizlet.js fills in Quizlet's own create-set page in
+  // this browser, where the user is already logged in; no login details ever leave the browser. The cards
+  // also go on the clipboard first, so pasting into Quizlet's Import box works if the page has changed.
+  async function sendToQuizlet(cards) {
+    if (!alive()) return;
+    const text = cardsAsText(cards);
+    navigator.clipboard.writeText(text).catch(() => {}); // fallback, while we still have the click
+    await chrome.storage.local.set({ quizletPending: { title: setTitle(), text, count: cards.length, at: Date.now() } });
+    chrome.runtime.sendMessage({ type: "openQuizlet" });
+    setStatus("Opening Quizlet...", "yta-ok");
+  }
+
+  function downloadForAnki(cards) {
+    // Anki reads these header lines (2.1.55+); older versions just ask about the separator on import.
+    const file = new Blob([`#separator:tab\n#html:false\n${cardsAsText(cards)}\n`], { type: "text/plain" });
+    const a = el("a", { href: URL.createObjectURL(file), download: `${setTitle().replace(/[\\/:*?"<>|]+/g, " ")}.txt` });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    setStatus("Downloaded. In Anki: File → Import, choose the file.", "yta-ok");
+  }
+
   // ---------- History ----------
   // ponytail: one key per video, never evicted; add LRU pruning if chrome.storage.local (10 MB) fills up.
 
@@ -991,7 +1104,7 @@ RULES
     const saved = (await chrome.storage.local.get(historyKey(videoId)))[historyKey(videoId)];
     if (!saved?.length || state?.videoId !== videoId || state.messages.length) return;
     state.messages = saved;
-    for (const m of saved) addMessage(m.role, m.role === "user" ? m.label || m.content : m.content, { cut: m.cut });
+    for (const m of saved) addMessage(m.role, m.role === "user" ? m.label || m.content : m.content, { cut: m.cut, cards: m.cards });
   }
 
   function clearHistory() {

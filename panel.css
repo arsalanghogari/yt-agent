@@ -58,10 +58,11 @@ html[dark] #yta-panel {
 #yta-panel .yta-body { padding: 0 14px 14px; }
 
 #yta-panel .yta-tabs {
-  display: grid; grid-template-columns: repeat(4, auto); justify-content: space-between; gap: 4px; margin-bottom: 10px;
+  display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px; margin-bottom: 10px;
   padding: 4px; border-radius: 10px; background: var(--yta-card); border: 1px solid var(--yta-line);
 }
 #yta-panel .yta-tab {
+  flex: 1 1 auto;
   display: flex; align-items: center; justify-content: center;
   padding: 7px 6px; border: 0; border-radius: 7px;
   background: transparent; color: var(--yta-muted); cursor: pointer; font: inherit; font-size: 13px;
@@ -142,6 +143,15 @@ ytd-watch-flexy:not([theater]):not([fullscreen]) #secondary #yta-panel:not(.yta-
 ytd-watch-flexy:not([theater]):not([fullscreen]) #secondary #yta-panel:not(.yta-collapsed) .yta-thread {
   flex: 1; min-height: 0; max-height: none;
 }
+
+/* Flashcards */
+#yta-panel .yta-row { flex-direction: row; }
+#yta-panel .yta-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+#yta-panel .yta-secondary {
+  padding: 8px 14px; border: 1px solid var(--yta-line); border-radius: 18px; background: transparent;
+  color: var(--yta-fg); font: inherit; font-weight: 600; cursor: pointer;
+}
+#yta-panel .yta-secondary:hover { background: rgba(128,128,128,.15); }
 
 /* Short version */
 #yta-panel .yta-cut-btn { margin-top: 10px; }

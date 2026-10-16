@@ -16,11 +16,15 @@ By default the extension uses Chrome's built-in AI, which runs on your own compu
 
 If you instead choose an AI provider in settings (for example Anthropic, OpenAI, Google Gemini, or a custom endpoint you enter), the video content and your prompts are sent only to that provider, using your own API key. That provider's privacy policy applies to what it receives. Nothing is sent anywhere else.
 
+## Flashcards and Quizlet
+
+When you click **Send to Quizlet**, the flashcards are saved briefly in Chrome's local extension storage and copied to your clipboard, then Quizlet's create-set page opens in your browser and the extension fills the cards in there. This happens in your own browser, in your own Quizlet session: the extension never reads, stores or sends your Quizlet login, and the cards are removed from extension storage once they've been filled in (or after 10 minutes). **Download for Anki** saves a text file on your computer.
+
 ## What the extension does not do
 
 - No analytics, tracking, or advertising.
 - No selling or sharing of data.
-- No access to websites other than youtube.com, the AI provider you picked, and any custom endpoint you approve.
+- No access to websites other than youtube.com, quizlet.com (only to fill in flashcards you send there), the AI provider you picked, and any custom endpoint you approve.
 
 ## Contact
 

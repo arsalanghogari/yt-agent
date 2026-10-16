@@ -6,6 +6,9 @@ An AI panel that sits right under the YouTube player and does three things with 
 2. **Explain**: understand the video in terms you already know. Type "explain it like I'm a rock climber" and every concept comes back as a climbing analogy, with a note on where the analogy breaks.
 3. **Ask an expert**: pick a lens ("a vocal coach analyzing live performances") and get the commentary that person would give, pointed at specific moments. Ask a question or let it free-comment.
 
+4. **Watch short** (prototype): plays only the video's best moments, back to back, in about 2, 5 or 10 minutes, cut at full sentences.
+5. **Flashcards** (prototype): turns the video into 10–30 study cards (term → definition or question → answer), each linking back to the moment it's explained. **Send to Quizlet** opens Quizlet's create-set page in your browser and fills it in for you to check and create (Quizlet has no public API, so this runs in your own logged-in browser; if Quizlet's page has changed, the cards are on your clipboard to paste into its Import box). **Download for Anki** saves a file Anki imports directly.
+
 Answers stream in as they are written. Every timestamp in an answer is clickable and seeks the player. Follow-up questions keep the thread going, and each video's chat is saved so it is still there when you come back (🗑 clears it).
 
 ## No setup needed
@@ -50,12 +53,21 @@ No server, no analytics. Your key, settings, and chat history stay in Chrome's l
 
 Copyright 2026 Arsalan Ghogari. Source available under the [PolyForm Strict License 1.0.0](LICENSE): you may install and use this extension for noncommercial purposes. You may not modify it, redistribute it, or build new works from it. For any other use, contact the author.
 
+## Tests
+
+```
+sh tests/run.sh
+```
+
+Runs the checks in `tests/` with Node (no dependencies): streaming for every provider, the built-in AI path, short-version cutting, and flashcard export.
+
 ## Files
 
 ```
 manifest.json     MV3 manifest
 background.js     provider adapters + message routing
 content.js        transcript fetch, panel UI, prompts
+quizlet.js        fills in Quizlet's create-set page with flashcards from the panel
 panel.css         panel styles (light + dark)
 options.html/js   settings page
 icons/            toolbar icons

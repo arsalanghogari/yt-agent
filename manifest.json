@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Agent for YouTube",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Summarize any YouTube video, explain it with analogies you pick, or get expert commentary. Free on-device AI, no setup.",
   "permissions": ["storage"],
   "host_permissions": ["https://www.youtube.com/*"],
@@ -14,6 +14,11 @@
       "matches": ["https://www.youtube.com/*"],
       "js": ["content.js"],
       "css": ["panel.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://quizlet.com/*"],
+      "js": ["quizlet.js"],
       "run_at": "document_idle"
     }
   ],
