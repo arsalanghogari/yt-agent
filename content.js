@@ -897,6 +897,7 @@ RULES
     body.querySelectorAll("a.yta-ts").forEach((a) => {
       a.href = `https://www.youtube.com/watch?v=${state.videoId}&t=${parseTime(a.dataset.t)}s`;
       a.removeAttribute("class");
+      a.removeAttribute("data-t");
     });
     await chrome.storage.local.set({ notesPdf: {
       title: state.ctx?.title || document.title.replace(/ - YouTube$/, ""), channel: state.ctx?.author || "",
