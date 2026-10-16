@@ -37,6 +37,21 @@
     field.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
+  // Insert text the way a real paste does, so the page's own listeners see it; plain value-setting as a fallback.
+  function pasteInto(field, value) {
+    field.focus();
+    field.select?.();
+    const ok = document.execCommand("insertText", false, value);
+    if (!ok || field.value !== value) setValue(field, value);
+  }
+
+  // The import box: a visible textarea, preferably in a dialog or asking to paste.
+  const findImportBox = () => [...document.querySelectorAll("textarea")].filter(visible)
+    .find((t) => t.closest("[role=dialog]") || /paste|copy|word/i.test(`${t.placeholder} ${label(t)}`)) || null;
+
+  // Quizlet shows "Preview N cards" under the box. NaN if there's no such text (then we check the box itself).
+  const previewCount = (scope) => Number((scope.innerText.match(/preview\s*(\d+)\s*card/i) || [])[1] ?? NaN);
+
   function banner(text, ok) {
     document.getElementById("yta-quizlet-banner")?.remove();
     const b = document.createElement("div");
@@ -79,26 +94,41 @@
       if (!importBtn) throw new Error("Import button not found");
       importBtn.click();
 
-      // The import box: a visible textarea, preferably in a dialog or asking to paste.
-      const box = await waitFor(() => {
-        const areas = [...document.querySelectorAll("textarea")].filter(visible);
-        return areas.find((t) => t.closest("[role=dialog]") || /paste|copy|word/i.test(`${t.placeholder} ${label(t)}`)) || null;
-      }, 8000);
+      // Paste, then check Quizlet actually took it: the dialog can still be rendering and swap in a fresh,
+      // empty box, so retry a few times and only go on once the preview shows the cards.
+      let box = null, taken = 0;
+      for (let attempt = 0; attempt < 4 && !taken; attempt++) {
+        box = await waitFor(findImportBox, attempt ? 3000 : 8000);
+        if (!box) break;
+        await sleep(500); // let the dialog finish rendering
+        box = findImportBox() || box;
+        pasteInto(box, job.text);
+        // Cards in the preview (or, without a preview, the text still in the box); -1 if the box was replaced.
+        const accepted = () => {
+          if (!box.isConnected) return -1;
+          const n = previewCount(box.closest("[role=dialog]") || document.body);
+          return n > 0 ? n : Number.isNaN(n) && box.value === job.text ? job.count : 0;
+        };
+        taken = (await waitFor(accepted, 3000)) || 0;
+        if (taken > 0) { await sleep(600); taken = accepted(); } // still there a moment later, not wiped by a re-render
+        if (taken < 0) taken = 0;
+      }
       if (!box) throw new Error("Import box not found");
-      setValue(box, job.text);
-      await sleep(700); // let Quizlet build its preview
+      if (!taken) throw new Error("Quizlet didn't take the pasted cards");
 
       const scope = box.closest("[role=dialog]") || document;
       const confirm = await waitFor(() => buttons(scope).filter((b) => b !== importBtn && /^import\b/i.test(label(b))).at(-1), 5000);
       if (!confirm) throw new Error("Import confirm button not found");
       confirm.click();
-      await sleep(800);
+      // The import is done when the import box is gone (not just swapped for a fresh one).
+      if (!(await waitFor(() => !findImportBox(), 5000))) throw new Error("Import didn't go through");
+      await sleep(500);
 
       const title = [...document.querySelectorAll("input, textarea, [contenteditable=true]")]
         .find((f) => visible(f) && /title/i.test(`${f.placeholder || ""} ${f.getAttribute("aria-label") || ""} ${f.name || ""}`));
       if (title && !(title.value || title.textContent || "").trim()) setValue(title, job.title);
 
-      banner(`Added ${job.count} flashcards from AI Agent for YouTube. Check them, then click Create.`, true);
+      banner(`Added ${taken} flashcards from AI Agent for YouTube. Check them, then click Create.`, true);
     } catch {
       banner("Couldn't fill in Quizlet automatically. Your flashcards are on your clipboard: click Import, paste them (⌘V or Ctrl+V), then click Import.", false);
     } finally {
